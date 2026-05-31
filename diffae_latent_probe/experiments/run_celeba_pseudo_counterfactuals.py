@@ -138,11 +138,66 @@ def _compute_attribute_accuracy(
     return pd.DataFrame(rows)
 
 
+def _compute_attribute_metrics(
+    probs_df: pd.DataFrame,
+    gt_df: pd.DataFrame,
+    target_attributes: list[str],
+) -> pd.DataFrame:
+    rows = []
+    for attr in target_attributes:
+        preds = probs_df[["image_id", attr]].rename(columns={attr: "pred"})
+        truth = gt_df[["image_id", attr]].rename(columns={attr: "gt"})
+        merged = preds.merge(truth, on="image_id", how="inner")
+        if merged.empty:
+            continue
+        pred_labels = (merged["pred"] >= 0.5).astype(int)
+        gt_labels = merged["gt"].astype(int)
+        tp = int(((pred_labels == 1) & (gt_labels == 1)).sum())
+        tn = int(((pred_labels == 0) & (gt_labels == 0)).sum())
+        fp = int(((pred_labels == 1) & (gt_labels == 0)).sum())
+        fn = int(((pred_labels == 0) & (gt_labels == 1)).sum())
+        precision = float(tp / (tp + fp)) if (tp + fp) else 0.0
+        recall = float(tp / (tp + fn)) if (tp + fn) else 0.0
+        f1 = float(2 * precision * recall / (precision + recall)) if (precision + recall) else 0.0
+        accuracy = float((tp + tn) / len(merged))
+        rows.append(
+            {
+                "attribute": attr,
+                "accuracy": accuracy,
+                "precision": precision,
+                "recall": recall,
+                "f1": f1,
+                "positive_rate_gt": float(gt_labels.mean()),
+                "positive_rate_pred": float(pred_labels.mean()),
+                "num_samples": int(len(merged)),
+                "tp": tp,
+                "tn": tn,
+                "fp": fp,
+                "fn": fn,
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def _evaluate_classifier_on_dataset(
+    classifier: AttributeClassifier,
+    loader: DataLoader,
+    attr_names: list[str],
+    gt_frame: pd.DataFrame,
+    device: torch.device,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    probs = predict_attribute_probabilities(classifier, loader, device)
+    probs_df = pd.DataFrame(probs.numpy(), columns=attr_names)
+    probs_df.insert(0, "image_id", gt_frame["image_id"].values)
+    metrics_df = _compute_attribute_metrics(probs_df, gt_frame, attr_names)
+    return probs_df, metrics_df
+
+
 def _compute_edited_accuracy(
     edited_probs_df: pd.DataFrame,
     gt_df: pd.DataFrame,
     target_attributes: list[str],
-    alpha_values: list[int],
+    alpha_values: list[float],
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     rows = []
     cumulative_rows = []
@@ -190,7 +245,7 @@ def _compute_edited_accuracy(
 def _evaluate_pseudo_results(
     pseudo_dir: Path,
     pseudo_results: dict[str, dict[str, str]],
-    alpha_values: list[int],
+    alpha_values: list[float],
     classifier: AttributeClassifier | None,
     device: torch.device,
     batch_size: int,
@@ -862,6 +917,7 @@ def main() -> None:
             save_grids=cfg["visualization"]["save_attribute_edit_grids"],
             xt_source="encoded",
             use_amp=cfg["pseudo_counterfactuals"].get("use_amp", True),
+            ddim_steps=cfg["pseudo_counterfactuals"].get("ddim_steps"),
         )
     pseudo_runs.append((pseudo_dir, pseudo_results))
     summary["pseudo_runs"] = [
@@ -897,6 +953,7 @@ def main() -> None:
                 xt_source="gaussian",
                 gaussian_generator=generator,
                 use_amp=cfg["pseudo_counterfactuals"].get("use_amp", True),
+                ddim_steps=cfg["pseudo_counterfactuals"].get("ddim_steps"),
             )
         pseudo_runs.append((gaussian_dir, gaussian_results))
         summary["pseudo_runs"].append(
@@ -910,7 +967,7 @@ def main() -> None:
 
     attribute_classifier_summary = {"status": "skipped", "target_accuracy_mean": None}
     if cfg["metrics"]["compute_attribute_predictions"]:
-        logger.info("Preparing attribute classifier.")
+        logger.info("Preparing target-attribute classifier for: %s", ", ".join(target_attributes))
         train_dataset = CelebADataset(
             image_dir=dataset_cfg["image_dir"],
             attr_path=dataset_cfg["attr_path"],
@@ -918,7 +975,26 @@ def main() -> None:
             split="train" if dataset_cfg.get("partition_path") else dataset_cfg.get("split"),
             partition_path=dataset_cfg.get("partition_path"),
         )
-        train_loader = DataLoader(train_dataset, batch_size=cfg["experiment"]["batch_size"], shuffle=True)
+        val_split = "val" if dataset_cfg.get("partition_path") else dataset_cfg.get("split")
+        val_dataset = CelebADataset(
+            image_dir=dataset_cfg["image_dir"],
+            attr_path=dataset_cfg["attr_path"],
+            image_size=dataset_cfg["image_size"],
+            split=val_split,
+            partition_path=dataset_cfg.get("partition_path"),
+        )
+
+        full_attr_names = train_dataset.get_attr_names()
+        missing_targets = [name for name in target_attributes if name not in full_attr_names]
+        if missing_targets:
+            raise ValueError(f"Target attributes missing from training labels: {missing_targets}")
+        attr_names = list(target_attributes)
+        target_attr_indices = [full_attr_names.index(name) for name in attr_names]
+        train_target = AttributeSubsetDataset(train_dataset, target_attr_indices, attr_names)
+        val_target = AttributeSubsetDataset(val_dataset, target_attr_indices, attr_names)
+        train_loader = DataLoader(train_target, batch_size=cfg["experiment"]["batch_size"], shuffle=True)
+        val_loader = DataLoader(val_target, batch_size=cfg["experiment"]["batch_size"], shuffle=False)
+
         classifier_cfg_dict = cfg.get("attribute_classifier", {})
         classifier_dir = ensure_dir(output_root / "attribute_classifier")
         model_path = Path(classifier_dir) / "model.pt"
@@ -927,20 +1003,20 @@ def main() -> None:
         if force_retrain:
             logger.info("Attribute classifier retrain requested; skipping cached model load.")
         classifier_cfg = AttributeClassifierConfig(
-            num_attributes=len(train_dataset.get_attr_names()),
+            num_attributes=len(attr_names),
             lr=classifier_cfg_dict.get("lr", 1e-3),
             epochs=classifier_cfg_dict.get("epochs", 3),
             backbone=classifier_cfg_dict.get("backbone", "resnet18"),
             pretrained=classifier_cfg_dict.get("pretrained", False),
         )
         logger.info(
-            "Attribute classifier: backbone=%s pretrained=%s attributes=%d epochs=%d",
+            "Attribute classifier: backbone=%s pretrained=%s attributes=%d epochs=%d names=%s",
             classifier_cfg.backbone,
             classifier_cfg.pretrained,
             classifier_cfg.num_attributes,
             classifier_cfg.epochs,
+            ",".join(attr_names),
         )
-        attr_names = train_dataset.get_attr_names()
         classifier_loaded = False
         classifier = None
         if model_path.exists() and meta_path.exists() and not force_retrain:
@@ -952,9 +1028,9 @@ def main() -> None:
                 meta_attr_names = metadata.get("attr_names", attr_names)
                 if meta_num_attrs != len(attr_names) or meta_attr_names != attr_names:
                     logger.warning(
-                        "Attribute classifier metadata mismatch (num_attrs=%s expected=%s). Retraining.",
-                        meta_num_attrs,
-                        len(attr_names),
+                        "Attribute classifier metadata mismatch (cached attrs=%s expected=%s). Retraining.",
+                        meta_attr_names,
+                        attr_names,
                     )
                 else:
                     classifier = AttributeClassifier(
@@ -966,20 +1042,20 @@ def main() -> None:
                     classifier.to(device)
                     classifier_loaded = True
                     attr_names = meta_attr_names
-                    logger.info("Loaded attribute classifier from %s", classifier_dir)
+                    logger.info("Loaded target-attribute classifier from %s", classifier_dir)
             except Exception as exc:
                 logger.warning("Failed to load attribute classifier (%s). Retraining.", exc)
         elif not force_retrain:
-            logger.info("No cached attribute classifier found at %s", classifier_dir)
+            logger.info("No cached target-attribute classifier found at %s", classifier_dir)
 
         if not classifier_loaded:
-            logger.info("Training attribute classifier.")
+            logger.info("Training target-attribute classifier.")
             classifier = AttributeClassifier(
                 num_attributes=classifier_cfg.num_attributes,
                 backbone=classifier_cfg.backbone,
                 pretrained=classifier_cfg.pretrained,
             )
-            classifier = train_attribute_classifier(classifier, train_loader, None, device, classifier_cfg)
+            classifier = train_attribute_classifier(classifier, train_loader, val_loader, device, classifier_cfg)
             torch.save(classifier.state_dict(), model_path)
             meta_payload = {
                 "num_attributes": classifier_cfg.num_attributes,
@@ -989,40 +1065,52 @@ def main() -> None:
                 "trained_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             }
             meta_path.write_text(json.dumps(meta_payload, indent=2))
-            logger.info("Saved attribute classifier to %s", classifier_dir)
+            logger.info("Saved target-attribute classifier to %s", classifier_dir)
 
-        logger.info("Predicting attributes for originals.")
-        original_loader = DataLoader(subset, batch_size=cfg["experiment"]["batch_size"], shuffle=False)
+        logger.info("Validating target-attribute classifier.")
+        val_gt_df = val_dataset.get_attribute_frame()[["image_id", *attr_names]].reset_index(drop=True)
+        val_probs_df, val_metrics_df = _evaluate_classifier_on_dataset(
+            classifier,
+            val_loader,
+            attr_names,
+            val_gt_df,
+            device,
+        )
+        val_probs_df.to_csv(Path(output_root) / "attribute_classifier_val_predictions.csv", index=False)
+        val_metrics_df.to_csv(Path(output_root) / "attribute_classifier_val_metrics.csv", index=False)
+        val_summary = {
+            "mean_accuracy": float(val_metrics_df["accuracy"].mean()) if not val_metrics_df.empty else None,
+            "mean_precision": float(val_metrics_df["precision"].mean()) if not val_metrics_df.empty else None,
+            "mean_recall": float(val_metrics_df["recall"].mean()) if not val_metrics_df.empty else None,
+            "mean_f1": float(val_metrics_df["f1"].mean()) if not val_metrics_df.empty else None,
+            "num_attributes": len(attr_names),
+            "attributes": attr_names,
+        }
+        (Path(output_root) / "attribute_classifier_val_summary.json").write_text(json.dumps(val_summary, indent=2))
+        logger.info("Saved target-attribute classifier validation metrics: %s", val_summary)
+
+        logger.info("Predicting target attributes for originals.")
+        original_target = AttributeSubsetDataset(subset, target_attr_indices, attr_names)
+        original_loader = DataLoader(original_target, batch_size=cfg["experiment"]["batch_size"], shuffle=False)
         original_probs = predict_attribute_probabilities(classifier, original_loader, device)
         original_probs_df = pd.DataFrame(original_probs.numpy(), columns=attr_names)
         original_probs_df.insert(0, "image_id", bundle.image_ids)
         original_probs_df.to_csv(Path(output_root) / "attribute_predictions_original.csv", index=False)
-        logger.info("Saved original attribute predictions.")
+        logger.info("Saved original target-attribute predictions.")
 
         gt_df = bundle.attributes.copy()
         gt_df.insert(0, "image_id", bundle.image_ids)
-        original_accuracy_all_df = _compute_attribute_accuracy(
-            original_probs_df,
-            gt_df,
-            attr_names,
-        )
-        original_accuracy_all_df.to_csv(Path(output_root) / "attribute_accuracy_original_all.csv", index=False)
-        original_accuracy_df = _compute_attribute_accuracy(original_probs_df, gt_df, target_attributes)
+        original_accuracy_df = _compute_attribute_metrics(original_probs_df, gt_df, attr_names)
         original_accuracy_df.to_csv(Path(output_root) / "attribute_accuracy_original.csv", index=False)
-        logger.info("Saved original attribute accuracies.")
+        logger.info("Saved original target-attribute accuracies.")
 
-        if not original_accuracy_df.empty:
-            attribute_classifier_summary = {
-                "status": "loaded" if classifier_loaded else "trained",
-                "target_accuracy_mean": float(original_accuracy_df["accuracy"].mean()),
-                "target_accuracy_path": str(Path(output_root) / "attribute_accuracy_original.csv"),
-            }
-        else:
-            attribute_classifier_summary = {
-                "status": "loaded" if classifier_loaded else "trained",
-                "target_accuracy_mean": None,
-                "target_accuracy_path": str(Path(output_root) / "attribute_accuracy_original.csv"),
-            }
+        attribute_classifier_summary = {
+            "status": "loaded" if classifier_loaded else "trained",
+            "target_accuracy_mean": float(original_accuracy_df["accuracy"].mean()) if not original_accuracy_df.empty else None,
+            "target_accuracy_path": str(Path(output_root) / "attribute_accuracy_original.csv"),
+            "val_metrics_path": str(Path(output_root) / "attribute_classifier_val_metrics.csv"),
+            "val_accuracy_mean": val_summary["mean_accuracy"],
+        }
 
         for pseudo_dir, pseudo_results in pseudo_runs:
             _evaluate_pseudo_results(
