@@ -1,0 +1,14 @@
+# Update the paths below for your local machine if needed.
+repo_root: "/home/anajibi/HDM/diffae_upstream"
+checkpoint_path: "/home/anajibi/HDM/diffae_upstream/checkpoints/ffhq256_autoenc/last.ckpt"
+image_dir: "/home/anajibi/HDM/diffae_latent_probe/data/raw_images"
+aligned_image_dir: "/home/anajibi/HDM/diffae_latent_probe/data/aligned_images"
+output_dir: "./outputs"
+image_size: 256
+batch_size: 4
+num_workers: 4
+device: "cuda"
+seed: 0
+save_reconstructions: true
+save_latents: true
+

@@ -1,0 +1,83 @@
+# CelebA pseudo-counterfactual experiment configuration.
+
+dataset:
+  name: celeba_hq
+  image_dir: "/home/anajibi/HDM/diffae_latent_probe/data/raw_images/celeba-hq"
+  attr_path: "/home/anajibi/HDM/diffae_latent_probe/data/celeba-hq/list_attr_celeba.txt"
+  partition_path: "/home/anajibi/HDM/diffae_latent_probe/data/celeba-hq/list_eval_partition.txt"
+  image_size: 256
+  split: "test"
+
+model:
+  name: diffae
+  checkpoint_path: "/home/anajibi/HDM/diffae_upstream/checkpoints/ffhq256_autoenc/last.ckpt"
+  repo_root: "/home/anajibi/HDM/diffae_upstream"
+
+latents:
+  output_dir: "outputs/celeba/latents"
+  recompute: false
+
+experiment:
+  num_images: 500
+  batch_size: 8
+  seed: 0
+  num_xt_samples: 8
+
+target_attributes:
+  - Young
+  - Male
+  - Eyeglasses
+  - Smiling
+
+attribute_editing:
+  alpha_values: [ -1, -0.5, 0, 0.5, 1 ]
+  classifier_type: logistic_regression
+  class_weight: balanced
+  normalize_direction: true
+
+attribute_filtering:
+  prevalence_min: 0.10
+  prevalence_max: 0.90
+  use_semantic_exclusion_groups: true
+
+pseudo_counterfactuals:
+  run_gaussian_xt_ablation: true
+  batch_size: 4
+
+component_ablation:
+  num_workers: 8
+  decode_chunk_size: 64
+  use_amp: true
+
+metrics:
+  compute_lpips: true
+  compute_ssim: true
+  compute_mse: true
+  compute_high_frequency: true
+  compute_arcface: false
+  compute_attribute_predictions: true
+
+attribute_classifier:
+  backbone: "resnet18"
+  pretrained: false
+  lr: 0.0003
+  epochs: 15
+
+other_attribute_classifier:
+  backbone: "resnet18"
+  pretrained: false
+  lr: 0.0003
+  epochs: 15
+  retrain: false
+
+visualization:
+  save_component_ablation_grids: true
+  save_attribute_edit_grids: true
+  save_attribute_images: true
+  save_failure_grids: true
+  num_visualization_images: 20
+  max_visualization_images: 20
+  save_ablation_per_image_metrics: false
+
+outputs:
+  root: "outputs/celeba_pseudo_counterfactuals"

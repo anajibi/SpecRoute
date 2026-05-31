@@ -1,0 +1,15 @@
+numpy
+pandas
+pyyaml
+pillow
+matplotlib
+seaborn
+scikit-learn
+scipy
+tqdm
+pytest
+scikit-image
+lpips
+torchvision
+torchmetrics
+kaggle
