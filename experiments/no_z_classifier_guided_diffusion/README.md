@@ -21,7 +21,13 @@ The baseline tests whether direct classifier guidance during denoising can edit 
 
 ## Quick start
 
-Update the dataset paths in `config/no_z_classifier_guided_poc.yaml`, then run a small smoke test:
+Install the experiment dependencies first:
+
+```bash
+pip install -r experiments/no_z_classifier_guided_diffusion/requirements.txt
+```
+
+For CUDA-specific PyTorch wheels, use the install command recommended by the PyTorch selector, then install the remaining requirements. Update the dataset paths in `config/no_z_classifier_guided_poc.yaml`, then run a small smoke test:
 
 ```bash
 python experiments/no_z_classifier_guided_diffusion/scripts/run_guided_editing_poc.py \
