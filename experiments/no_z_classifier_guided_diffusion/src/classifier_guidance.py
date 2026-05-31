@@ -4,9 +4,9 @@ import torch
 import torch.nn.functional as F
 
 try:
-    from .ddim_inversion import predict_x0_from_noise
+    from .ddim_inversion import _to_unet_dtype, predict_x0_from_noise
 except ImportError:  # pragma: no cover
-    from ddim_inversion import predict_x0_from_noise
+    from ddim_inversion import _to_unet_dtype, predict_x0_from_noise
 
 
 def _normalize_gradient(gradient: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:
@@ -33,7 +33,7 @@ def classifier_guided_ddim_sample(
     num_inference_steps: int = 50,
 ) -> torch.Tensor:
     scheduler.set_timesteps(num_inference_steps, device=device)
-    sample = x_T.detach().to(device)
+    sample = _to_unet_dtype(x_T.detach().to(device), unet)
     classifier.eval()
     unet.eval()
     target = torch.full((sample.shape[0],), float(target_value), device=device, dtype=torch.float32)
@@ -48,7 +48,7 @@ def classifier_guided_ddim_sample(
         )
         if do_guidance:
             for _ in range(num_guidance_steps_per_timestep):
-                sample = sample.detach().requires_grad_(True)
+                sample = sample.detach().clone().requires_grad_(True)
                 with torch.enable_grad(), torch.autocast(device_type=device.type, dtype=torch.float16, enabled=amp_enabled):
                     noise_pred = unet(sample, timestep).sample
                     classifier_input = predict_x0_from_noise(sample, timestep, noise_pred, scheduler) if guidance_on_x0_pred else sample
@@ -59,10 +59,10 @@ def classifier_guided_ddim_sample(
                     loss = F.binary_cross_entropy_with_logits(logit, target)
                 gradient = torch.autograd.grad(loss, sample, retain_graph=False, create_graph=False)[0]
                 gradient = _normalize_gradient(gradient)
-                sample = (sample - float(guidance_scale) * gradient).detach().to(dtype=compute_dtype)
+                sample = _to_unet_dtype((sample - float(guidance_scale) * gradient).detach().to(dtype=compute_dtype), unet)
                 del gradient, loss, logits, logit, noise_pred, classifier_input
 
         with torch.inference_mode(), torch.autocast(device_type=device.type, dtype=torch.float16, enabled=amp_enabled):
             noise_pred = unet(sample, timestep).sample
-            sample = scheduler.step(noise_pred, timestep, sample).prev_sample.detach()
-    return sample.detach().clamp(-1, 1)
+            sample = _to_unet_dtype(scheduler.step(noise_pred, timestep, sample).prev_sample.detach(), unet)
+    return sample.detach().clone().clamp(-1, 1)
