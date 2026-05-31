@@ -17,8 +17,6 @@ class DiffAEWrapper:
     def encode_stochastic(self, images: torch.Tensor, z_sem: torch.Tensor) -> torch.Tensor:
         return self.wrapper.encode_stochastic(images, z_sem=z_sem, return_cpu=False)
 
-    def decode(self, z_sem: torch.Tensor, x_t: torch.Tensor, ddim_steps: int | None = None) -> torch.Tensor:
-        if ddim_steps is not None:
-            return self.wrapper.reconstruct(z_sem=z_sem, stochastic=x_t, ddim_steps=ddim_steps, return_cpu=False)
+    def decode(self, z_sem: torch.Tensor, x_t: torch.Tensor) -> torch.Tensor:
         return self.wrapper.decode_from_latents(z_sem, x_t, return_cpu=False)
 

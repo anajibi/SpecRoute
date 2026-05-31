@@ -19,7 +19,7 @@ def run_preservation_analysis(
     attributes_df: pd.DataFrame,
     target_attributes: list[str],
     attr_names: list[str],
-    alpha_values: list[float],
+    alpha_values: list[int],
     output_dir: str | Path,
     prevalence_min: float,
     prevalence_max: float,
@@ -73,14 +73,10 @@ def run_preservation_analysis(
                 success = target_edit_success(original_target, edited_target, direction)
                 flip = target_flip_rate(original_target, edited_target)
 
-                if preserved:
-                    original_preserved = original_row[preserved].values.astype(float)
-                    edited_preserved = row[preserved].values.astype(float)
-                    prob_delta = non_target_prob_delta(original_preserved, edited_preserved)
-                    flip_rate = non_target_flip_rate(original_preserved, edited_preserved)
-                else:
-                    prob_delta = float("nan")
-                    flip_rate = float("nan")
+                original_preserved = original_row[preserved].values.astype(float)
+                edited_preserved = row[preserved].values.astype(float)
+                prob_delta = non_target_prob_delta(original_preserved, edited_preserved)
+                flip_rate = non_target_flip_rate(original_preserved, edited_preserved)
 
                 metrics_rows.append(
                     {
@@ -105,7 +101,7 @@ def run_preservation_analysis(
         summary_rows.append(
             {
                 "edited_attribute": attr,
-                "alpha": float(alpha),
+                "alpha": int(alpha),
                 "success_score_mean": float(group["success_score"].mean()),
                 "success_score_std": float(group["success_score"].std(ddof=0)),
                 "target_flip_rate": float(group["target_flip"].mean()),

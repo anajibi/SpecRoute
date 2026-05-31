@@ -43,8 +43,6 @@ attribute_filtering:
 pseudo_counterfactuals:
   run_gaussian_xt_ablation: true
   batch_size: 4
-  # More DDIM render steps produce cleaner edited-image reconstructions than the old 20-step default.
-  ddim_steps: 100
 
 component_ablation:
   num_workers: 8
@@ -63,8 +61,7 @@ attribute_classifier:
   backbone: "resnet18"
   pretrained: false
   lr: 0.0003
-  epochs: 50
-  retrain: false
+  epochs: 15
 
 other_attribute_classifier:
   backbone: "resnet18"

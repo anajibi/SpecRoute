@@ -27,7 +27,7 @@ def generate_pseudo_counterfactuals(
     bundle,
     directions: dict,
     target_attributes: list[str],
-    alpha_values: list[float],
+    alpha_values: list[int],
     output_dir: str | Path,
     image_size: int,
     device: torch.device,
@@ -38,7 +38,6 @@ def generate_pseudo_counterfactuals(
     xt_source: str = "encoded",
     gaussian_generator: torch.Generator | None = None,
     use_amp: bool = True,
-    ddim_steps: int | None = None,
 ) -> dict[str, dict[str, str]]:
     output_dir = Path(output_dir)
     images_dir = output_dir / "images"
@@ -57,10 +56,6 @@ def generate_pseudo_counterfactuals(
     else:
         LOGGER.info("Visualization cap: %d", max_visualization_images)
     LOGGER.info("x_T source: %s", xt_source)
-    if ddim_steps is None:
-        LOGGER.info("DDIM render steps: model default")
-    else:
-        LOGGER.info("DDIM render steps: %d", ddim_steps)
 
     z_sem_cpu = bundle.z_sem.float().cpu()
     x_t_cpu = bundle.x_t.float().cpu()
@@ -128,8 +123,8 @@ def generate_pseudo_counterfactuals(
 
             with torch.inference_mode():
                 with torch.autocast(device_type="cuda", dtype=torch.float16, enabled=amp_enabled):
-                    recon = model.decode(z_edit_flat, x_t_rep, ddim_steps=ddim_steps)
-                    rand_recon = model.decode(z_rand_flat, x_t_rep, ddim_steps=ddim_steps)
+                    recon = model.decode(z_edit_flat, x_t_rep)
+                    rand_recon = model.decode(z_rand_flat, x_t_rep)
 
             recon_01 = _to_01_gpu(recon).view(len(alpha_values), len(idx), *recon.shape[1:])
             rand_01 = _to_01_gpu(rand_recon).view(len(alpha_values), len(idx), *rand_recon.shape[1:])
@@ -149,7 +144,7 @@ def generate_pseudo_counterfactuals(
                         {
                             "attribute": attr,
                             "image_id": image_id,
-                            "alpha": float(alpha),
+                            "alpha": int(alpha),
                             "kind": "edit",
                             "path": str(out_path) if save_images else "",
                         }
@@ -158,7 +153,7 @@ def generate_pseudo_counterfactuals(
                         {
                             "attribute": attr,
                             "image_id": image_id,
-                            "alpha": float(alpha),
+                            "alpha": int(alpha),
                             "kind": "random_control",
                             "path": str(rand_path) if save_images else "",
                         }
