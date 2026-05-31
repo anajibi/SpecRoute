@@ -6,9 +6,9 @@ experiment:
   output_root: experiments/no_z_classifier_guided_diffusion/outputs/poc
 
 dataset:
-  image_dir: path/to/images
-  attr_path: path/to/list_attr_celeba.txt
-  partition_path: path/to/list_eval_partition.txt
+  image_dir: "/home/anajibi/HDM/diffae_latent_probe/data/raw_images/celeba-hq"
+  attr_path: "/home/anajibi/HDM/diffae_latent_probe/data/celeba-hq/list_attr_celeba.txt"
+  partition_path: "/home/anajibi/HDM/diffae_latent_probe/data/celeba-hq/list_eval_partition.txt"
   split: test
   image_size: 256
 
