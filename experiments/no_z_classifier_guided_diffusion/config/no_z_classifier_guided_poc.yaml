@@ -1,0 +1,64 @@
+experiment:
+  seed: 42
+  num_images: 16
+  batch_size: 4
+  device: cuda
+  output_root: experiments/no_z_classifier_guided_diffusion/outputs/poc
+
+dataset:
+  image_dir: path/to/images
+  attr_path: path/to/list_attr_celeba.txt
+  partition_path: path/to/list_eval_partition.txt
+  split: test
+  image_size: 256
+
+diffusion:
+  model_id: google/ddpm-celebahq-256
+  num_inference_steps: 50
+  num_inversion_steps: 50
+  use_fp16: true
+  use_amp: true
+
+classifier:
+  backbone: resnet18
+  pretrained: false
+  epochs: 3
+  lr: 0.001
+  batch_size: 64
+  retrain: false
+
+editing:
+  target_attributes:
+    - Smiling
+    - Male
+    - Young
+    - Eyeglasses
+  target_values:
+    Smiling: 1
+    Male: 1
+    Young: 0
+    Eyeglasses: 0
+  guidance_scales:
+    - 0.0
+    - 0.25
+    - 0.5
+    - 1.0
+    - 2.0
+    - 4.0
+  guidance_start_step: 0
+  guidance_end_step: 50
+  num_guidance_steps_per_timestep: 1
+  clamp_x0: true
+  guidance_on_x0_pred: true
+
+evaluation:
+  compute_attribute_predictions: true
+  compute_target_success: true
+  compute_non_target_preservation: true
+  compute_mse: true
+  compute_ssim: false
+  compute_lpips: false
+
+visualization:
+  save_grids: true
+  max_visualization_images: 16
