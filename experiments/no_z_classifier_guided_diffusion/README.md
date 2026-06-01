@@ -40,4 +40,4 @@ The script writes outputs under `experiments/no_z_classifier_guided_diffusion/ou
 - `preservation_summary.csv`
 - `images/` and `grids/`
 
-The classifier checkpoint is cached separately under `experiments/no_z_classifier_guided_diffusion/outputs/attribute_classifier/` unless `classifier.retrain: true` is set.
+Classifier checkpoints are cached separately under `experiments/no_z_classifier_guided_diffusion/outputs/attribute_classifier/<attribute>/` unless `classifier.retrain: true` is set. Each classifier is a single-output binary predictor trained only for the one attribute currently being edited, not the full CelebA attribute set. Validation metrics are written to `outputs/attribute_classifier/<attribute>/validation_metrics.csv` after training. The default DDIM inversion/sampling step counts are intentionally higher than a minimal smoke test to reduce reconstruction artifacts; lower them only for quick debugging.

@@ -35,10 +35,20 @@ def _apply_overrides(cfg: dict, args: argparse.Namespace) -> dict:
     return cfg
 
 
-def _validate_target_attributes(target_attributes: list[str], attr_names: list[str]) -> None:
-    missing = sorted(set(target_attributes) - set(attr_names))
-    if missing:
-        raise ValueError(f"Target attributes not found in classifier labels: {missing}")
+def _safe_attribute_name(attribute: str) -> str:
+    return attribute.replace("/", "_").replace(" ", "_")
+
+
+def _merge_single_attribute_predictions(
+    predictions_by_attr: dict[str, list[dict[str, object]]],
+    image_paths: list[str],
+) -> list[dict[str, object]]:
+    merged = [{"row_id": row_idx, "image_path": str(path)} for row_idx, path in enumerate(image_paths)]
+    by_path = {row["image_path"]: row for row in merged}
+    for attr_name, rows in predictions_by_attr.items():
+        for row in rows:
+            by_path[str(row["image_path"])][attr_name] = row[attr_name]
+    return merged
 
 
 def main() -> None:
@@ -73,10 +83,18 @@ def main() -> None:
     )
     subset = build_subset(dataset, int(exp_cfg.get("num_images", 16)))
 
-    classifier, attr_names, classifier_checkpoint, classifier_loaded = train_or_load_classifier(cfg, device)
-    _validate_target_attributes(list(editing_cfg["target_attributes"]), attr_names)
-    attr_to_index = {name: index for index, name in enumerate(attr_names)}
-    print(f"Using classifier checkpoint: {classifier_checkpoint} (loaded={classifier_loaded})")
+    target_attributes = list(editing_cfg["target_attributes"])
+    target_classifiers: dict[str, torch.nn.Module] = {}
+    attr_names: list[str] = []
+    for target_attr in target_attributes:
+        classifier, classifier_attr_names, classifier_checkpoint, classifier_loaded = train_or_load_classifier(
+            cfg, device, target_attribute=target_attr
+        )
+        if classifier_attr_names != [target_attr]:
+            raise ValueError(f"Expected a single-output classifier for {target_attr}, got {classifier_attr_names}")
+        target_classifiers[target_attr] = classifier
+        attr_names.append(target_attr)
+        print(f"Using {target_attr} classifier checkpoint: {classifier_checkpoint} (loaded={classifier_loaded})")
 
     backbone = load_unconditional_celebahq_backbone(
         model_id=diffusion_cfg.get("model_id", "google/ddpm-celebahq-256"),
@@ -115,9 +133,10 @@ def main() -> None:
         )
         reconstruction_path = save_tensor_image(reconstruction[0], recon_dir / f"{stem}_ddim_reconstruction.png")
 
-        for target_attr in editing_cfg["target_attributes"]:
+        for target_attr in target_attributes:
+            classifier = target_classifiers[target_attr]
             target_value = int(target_values[target_attr])
-            target_idx = attr_to_index[target_attr]
+            target_idx = 0
             target_records_start = len(records)
             for guidance_scale in guidance_scales:
                 sample = classifier_guided_ddim_sample(
@@ -170,24 +189,33 @@ def main() -> None:
 
     if bool(evaluation_cfg.get("compute_attribute_predictions", True)):
         unique_original_paths = list(dict.fromkeys(original_paths))
-        original_predictions = predict_paths_to_csv(
-            classifier,
-            unique_original_paths,
-            attr_names,
-            output_root / "attribute_predictions_original.csv",
-            device,
-            image_size=image_size,
-            batch_size=int(exp_cfg.get("batch_size", 4)),
-        )
-        edited_predictions = predict_paths_to_csv(
-            classifier,
-            [str(record["edited_path"]) for record in records],
-            attr_names,
-            output_root / "attribute_predictions_edited.csv",
-            device,
-            image_size=image_size,
-            batch_size=int(exp_cfg.get("batch_size", 4)),
-        )
+        edited_paths = [str(record["edited_path"]) for record in records]
+        original_by_attr: dict[str, list[dict[str, object]]] = {}
+        edited_by_attr: dict[str, list[dict[str, object]]] = {}
+        for target_attr, classifier in target_classifiers.items():
+            safe_attr = _safe_attribute_name(target_attr)
+            original_by_attr[target_attr] = predict_paths_to_csv(
+                classifier,
+                unique_original_paths,
+                [target_attr],
+                output_root / f"attribute_predictions_original_{safe_attr}.csv",
+                device,
+                image_size=image_size,
+                batch_size=int(exp_cfg.get("batch_size", 4)),
+            )
+            edited_by_attr[target_attr] = predict_paths_to_csv(
+                classifier,
+                edited_paths,
+                [target_attr],
+                output_root / f"attribute_predictions_edited_{safe_attr}.csv",
+                device,
+                image_size=image_size,
+                batch_size=int(exp_cfg.get("batch_size", 4)),
+            )
+        original_predictions = _merge_single_attribute_predictions(original_by_attr, unique_original_paths)
+        edited_predictions = _merge_single_attribute_predictions(edited_by_attr, edited_paths)
+        write_dicts_csv(original_predictions, output_root / "attribute_predictions_original.csv")
+        write_dicts_csv(edited_predictions, output_root / "attribute_predictions_edited.csv")
         compute_edit_metrics(
             records,
             original_predictions,

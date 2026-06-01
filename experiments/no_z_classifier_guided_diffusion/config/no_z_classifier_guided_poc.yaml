@@ -14,15 +14,15 @@ dataset:
 
 diffusion:
   model_id: google/ddpm-celebahq-256
-  num_inference_steps: 50
-  num_inversion_steps: 50
+  num_inference_steps: 250
+  num_inversion_steps: 250
   use_fp16: true
   use_amp: true
 
 classifier:
   backbone: resnet18
   pretrained: false
-  epochs: 3
+  epochs: 15
   lr: 0.001
   batch_size: 64
   retrain: false
@@ -46,7 +46,7 @@ editing:
     - 2.0
     - 4.0
   guidance_start_step: 0
-  guidance_end_step: 50
+  guidance_end_step: 250
   num_guidance_steps_per_timestep: 1
   clamp_x0: true
   guidance_on_x0_pred: true
