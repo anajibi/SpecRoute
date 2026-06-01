@@ -191,7 +191,7 @@ def main() -> None:
             target_idx = 0
             target_records_start = len(records)
             for guidance_scale in guidance_scales:
-                guidance_diagnostics: list[dict[str, float]] | None
+                guidance_diagnostics: list[dict[str, float | str]] | None
                 guidance_diagnostics = [] if save_guidance_diagnostics else None
                 sample = classifier_guided_ddim_sample(
                     unet=backbone.unet,
@@ -211,6 +211,8 @@ def main() -> None:
                     num_inference_steps=primary_inference_steps,
                     guidance_step_size=float(editing_cfg.get("guidance_step_size", 0.05)),
                     max_guided_sample_abs=editing_cfg.get("max_guided_sample_abs", 10.0),
+                    min_guidance_alpha_cumprod=float(editing_cfg.get("min_guidance_alpha_cumprod", 1.0e-3)),
+                    skip_nonfinite_guidance=bool(editing_cfg.get("skip_nonfinite_guidance", True)),
                     diagnostics=guidance_diagnostics,
                 )
                 diagnostics_path = ""

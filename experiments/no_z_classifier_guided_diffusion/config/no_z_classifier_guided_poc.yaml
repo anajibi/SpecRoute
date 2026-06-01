@@ -53,13 +53,17 @@ editing:
     - 1.0
     - 2.0
     - 4.0
-  guidance_start_step: 0
+  # Avoid the earliest, noisiest DDIM steps where predicted-x0 classifier
+  # gradients are least meaningful and most likely to overflow.
+  guidance_start_step: 25
   guidance_end_step: 250
   num_guidance_steps_per_timestep: 1
   # The normalized classifier gradient has unit RMS; applying it unscaled at
   # every DDIM step is too aggressive and can produce NaNs.
   guidance_step_size: 0.05
   max_guided_sample_abs: 10.0
+  min_guidance_alpha_cumprod: 0.001
+  skip_nonfinite_guidance: true
   clamp_x0: true
   # Saves per-timestep loss/probability/gradient/update diagnostics for each
   # guided sample, useful when edited images look identical to reconstructions.
