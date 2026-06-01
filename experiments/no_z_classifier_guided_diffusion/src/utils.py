@@ -57,8 +57,29 @@ def add_project_paths() -> None:
             sys.path.insert(0, path_str)
 
 
+def _finite_tensor_summary(tensor: torch.Tensor) -> str:
+    finite_mask = torch.isfinite(tensor)
+    finite_count = int(finite_mask.sum().item())
+    total_count = int(tensor.numel())
+    if finite_count == 0:
+        return f"finite=0/{total_count}, min=nan, max=nan"
+    finite_values = tensor.detach().float()[finite_mask]
+    return (
+        f"finite={finite_count}/{total_count}, "
+        f"min={float(finite_values.min().item()):.6g}, "
+        f"max={float(finite_values.max().item()):.6g}"
+    )
+
+
+def validate_finite_tensor(tensor: torch.Tensor, name: str) -> None:
+    if not torch.isfinite(tensor).all():
+        raise FloatingPointError(f"{name} contains NaN or Inf values ({_finite_tensor_summary(tensor)})")
+
+
 def tensor_to_uint8_image(tensor: torch.Tensor) -> Image.Image:
-    image = tensor.detach().float().cpu().clamp(-1, 1)
+    image = tensor.detach().float().cpu()
+    validate_finite_tensor(image, "image tensor")
+    image = image.clamp(-1, 1)
     image = (image + 1.0) / 2.0
     image = image.permute(1, 2, 0).numpy()
     image = (image * 255.0).round().clip(0, 255).astype(np.uint8)
@@ -68,7 +89,11 @@ def tensor_to_uint8_image(tensor: torch.Tensor) -> Image.Image:
 def save_tensor_image(tensor: torch.Tensor, path: str | Path) -> Path:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    tensor_to_uint8_image(tensor).save(path)
+    try:
+        image = tensor_to_uint8_image(tensor)
+    except FloatingPointError as exc:
+        raise FloatingPointError(f"Cannot save non-finite image tensor to {path}: {exc}") from exc
+    image.save(path)
     return path
 
 
