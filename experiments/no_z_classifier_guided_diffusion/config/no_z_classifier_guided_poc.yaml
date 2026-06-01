@@ -15,8 +15,8 @@ dataset:
 diffusion:
   model_id: google/ddpm-celebahq-256
   # More DDIM steps improve reconstruction/edit quality at the cost of runtime.
-  num_inference_steps: 500
-  num_inversion_steps: 500
+  num_inference_steps: 700
+  num_inversion_steps: 700
   # Keep DDIM predicted-x0 clipping disabled during inversion/reconstruction;
   # clipping each intermediate x0 estimate is lossy and causes severe artifacts.
   clip_sample: false
@@ -55,13 +55,13 @@ editing:
     - 1.0
   # Keep the same relative guidance window as the 250-step setup (30%-90%):
   # avoid both the noisiest early steps and final pixel-level adversarial steps.
-  guidance_start_step: 150
+  guidance_start_step: 50
   guidance_end_step: 450
-  num_guidance_steps_per_timestep: 1
+  num_guidance_steps_per_timestep: 2
   # The normalized classifier gradient has unit RMS; applying it unscaled at
   # every DDIM step is too aggressive and creates adversarial color/texture artifacts.
   guidance_step_size: 0.005
-  max_guidance_update_rms: 0.01
+  max_guidance_update_rms: 0.02
   gradient_smoothing_kernel: 7
   max_guided_sample_abs: 4.0
   min_guidance_alpha_cumprod: 0.01
@@ -69,7 +69,7 @@ editing:
   clamp_x0: true
   # Saves per-timestep loss/probability/gradient/update diagnostics for each
   # guided sample, useful when edited images look identical to reconstructions.
-  save_guidance_diagnostics: true
+  save_guidance_diagnostics: false
   guidance_on_x0_pred: true
 
 evaluation:
