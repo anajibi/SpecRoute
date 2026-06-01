@@ -12,6 +12,7 @@ if _HAS_TORCH:
     import torch
 
     from experiments.no_z_classifier_guided_diffusion.src.classifier_guidance import (
+        _cap_update_rms,
         _normalize_gradient,
         _straight_through_clamp,
         classifier_guided_ddim_sample,
@@ -56,6 +57,15 @@ def test_normalize_gradient_handles_large_fp16_values() -> None:
 
     assert torch.isfinite(normalized).all()
     assert torch.all(normalized > 0)
+
+
+def test_cap_update_rms_limits_large_updates() -> None:
+    update = torch.full((1, 1, 2, 2), 10.0)
+
+    capped = _cap_update_rms(update, max_update_rms=0.25)
+
+    rms = capped.square().mean().sqrt()
+    assert torch.isclose(rms, torch.tensor(0.25))
 
 
 def test_classifier_guidance_changes_saturated_x0_when_clamped() -> None:
