@@ -28,6 +28,20 @@ def _straight_through_clamp(tensor: torch.Tensor, min_value: float, max_value: f
     return tensor + (clamped - tensor).detach()
 
 
+def _ensure_finite(tensor: torch.Tensor, name: str, *, step_index: int, timestep: torch.Tensor | int) -> None:
+    if torch.isfinite(tensor).all():
+        return
+    if isinstance(timestep, torch.Tensor):
+        timestep_value = int(timestep.detach().cpu().item())
+    else:
+        timestep_value = int(timestep)
+    finite_fraction = float(torch.isfinite(tensor).float().mean().detach().cpu().item())
+    raise FloatingPointError(
+        f"Non-finite {name} during classifier guidance at "
+        f"step_index={step_index}, timestep={timestep_value}, finite_fraction={finite_fraction:.6f}"
+    )
+
+
 def _append_guidance_diagnostic(
     diagnostics: list[dict[str, float]] | None,
     *,
@@ -88,6 +102,8 @@ def classifier_guided_ddim_sample(
     guidance_on_x0_pred: bool = True,
     use_amp: bool = True,
     num_inference_steps: int = 50,
+    guidance_step_size: float = 1.0,
+    max_guided_sample_abs: float | None = None,
     diagnostics: list[dict[str, float]] | None = None,
 ) -> torch.Tensor:
     scheduler.set_timesteps(num_inference_steps, device=device)
@@ -121,10 +137,22 @@ def classifier_guided_ddim_sample(
                     logit = logits[:, target_attribute_index].float()
                     target_prob = torch.sigmoid(logit)
                     loss = F.binary_cross_entropy_with_logits(logit, target)
+                _ensure_finite(loss, "classifier guidance loss", step_index=step_index, timestep=timestep)
                 gradient = torch.autograd.grad(loss, sample, retain_graph=False, create_graph=False)[0]
+                _ensure_finite(gradient, "classifier guidance gradient", step_index=step_index, timestep=timestep)
                 gradient = _normalize_gradient(gradient)
+                _ensure_finite(
+                    gradient,
+                    "normalized classifier guidance gradient",
+                    step_index=step_index,
+                    timestep=timestep,
+                )
                 sample_before = sample.detach()
-                sample_after = sample - float(guidance_scale) * gradient
+                guidance_update = float(guidance_scale) * float(guidance_step_size) * gradient
+                sample_after = sample - guidance_update
+                if max_guided_sample_abs is not None:
+                    sample_after = sample_after.clamp(-float(max_guided_sample_abs), float(max_guided_sample_abs))
+                _ensure_finite(sample_after, "guided sample", step_index=step_index, timestep=timestep)
                 _append_guidance_diagnostic(
                     diagnostics,
                     step_index=step_index,
@@ -138,9 +166,11 @@ def classifier_guided_ddim_sample(
                     sample_after=sample_after.detach(),
                 )
                 sample = _to_unet_dtype(sample_after.detach().to(dtype=compute_dtype), unet)
-                del gradient, loss, logits, logit, noise_pred, classifier_input, classifier_input_unclamped, target_prob
+                del gradient, guidance_update, loss, logits, logit, noise_pred, classifier_input
+                del classifier_input_unclamped, target_prob
 
         with torch.inference_mode(), torch.autocast(device_type=device.type, dtype=torch.float16, enabled=amp_enabled):
             noise_pred = unet(sample, timestep).sample
             sample = _to_unet_dtype(scheduler.step(noise_pred, timestep, sample).prev_sample.detach(), unet)
+            _ensure_finite(sample, "DDIM scheduler sample", step_index=step_index, timestep=timestep)
     return sample.detach().clone().clamp(-1, 1)

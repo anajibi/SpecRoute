@@ -69,6 +69,7 @@ def test_classifier_guidance_changes_saturated_x0_when_clamped() -> None:
         guidance_on_x0_pred=True,
         use_amp=False,
         num_inference_steps=1,
+        guidance_step_size=1.0,
         diagnostics=diagnostics,
     )
 

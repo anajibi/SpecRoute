@@ -209,6 +209,8 @@ def main() -> None:
                     guidance_on_x0_pred=bool(editing_cfg.get("guidance_on_x0_pred", True)),
                     use_amp=bool(diffusion_cfg.get("use_amp", True)),
                     num_inference_steps=primary_inference_steps,
+                    guidance_step_size=float(editing_cfg.get("guidance_step_size", 0.05)),
+                    max_guided_sample_abs=editing_cfg.get("max_guided_sample_abs", 10.0),
                     diagnostics=guidance_diagnostics,
                 )
                 diagnostics_path = ""
