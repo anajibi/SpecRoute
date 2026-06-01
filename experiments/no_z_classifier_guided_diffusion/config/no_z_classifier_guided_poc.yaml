@@ -29,12 +29,19 @@ diffusion:
   use_amp: true
 
 classifier:
-  backbone: resnet18
-  pretrained: false
-  epochs: 15
-  lr: 0.001
-  batch_size: 64
-  retrain: false
+  # Off-the-shelf pretrained CelebA attribute classifier from Hugging Face Hub.
+  # The editing driver no longer trains project-local per-attribute classifiers.
+  provider: hf_torchvision_state_dict
+  model_id: pymlex/celeba-gan-xai
+  checkpoint_filename: attribute_classifier.pt
+  architecture: resnet18
+  input_size: 64
+  attributes:
+    - Smiling
+    - Eyeglasses
+    - Young
+    - Male
+    - Blond_Hair
 
 editing:
   target_attributes:
@@ -53,10 +60,10 @@ editing:
     - 0.25
     - 0.5
     - 1.0
-  # Keep the same relative guidance window as the 250-step setup (30%-90%):
-  # avoid both the noisiest early steps and final pixel-level adversarial steps.
-  guidance_start_step: 50
-  guidance_end_step: 450
+  # Relative guidance window; resolved against diffusion.num_inference_steps.
+  # For 700 steps, 30%-90% becomes steps [210, 630).
+  guidance_start_fraction: 0.30
+  guidance_end_fraction: 0.90
   num_guidance_steps_per_timestep: 2
   # The normalized classifier gradient has unit RMS; applying it unscaled at
   # every DDIM step is too aggressive and creates adversarial color/texture artifacts.
