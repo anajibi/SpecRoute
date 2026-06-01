@@ -16,6 +16,14 @@ diffusion:
   model_id: google/ddpm-celebahq-256
   num_inference_steps: 250
   num_inversion_steps: 250
+  # Keep DDIM predicted-x0 clipping disabled during inversion/reconstruction;
+  # clipping each intermediate x0 estimate is lossy and causes severe artifacts.
+  clip_sample: false
+  # Optional reconstruction-only diagnostic sweep.  Add larger values (for
+  # example 500 or 1000) to save extra *_ddim_reconstruction_<steps>steps.png
+  # images without running classifier guidance for those diagnostic step counts.
+  reconstruction_step_counts:
+    - 250
   use_fp16: true
   use_amp: true
 
@@ -49,6 +57,9 @@ editing:
   guidance_end_step: 250
   num_guidance_steps_per_timestep: 1
   clamp_x0: true
+  # Saves per-timestep loss/probability/gradient/update diagnostics for each
+  # guided sample, useful when edited images look identical to reconstructions.
+  save_guidance_diagnostics: true
   guidance_on_x0_pred: true
 
 evaluation:

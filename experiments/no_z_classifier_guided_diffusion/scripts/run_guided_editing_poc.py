@@ -39,6 +39,27 @@ def _safe_attribute_name(attribute: str) -> str:
     return attribute.replace("/", "_").replace(" ", "_")
 
 
+def _configured_reconstruction_step_counts(diffusion_cfg: dict) -> list[int]:
+    primary_steps = int(diffusion_cfg.get("num_inference_steps", 50))
+    configured_steps = diffusion_cfg.get("reconstruction_step_counts") or [primary_steps]
+    step_counts: list[int] = []
+    for value in configured_steps:
+        step_count = int(value)
+        if step_count <= 0:
+            raise ValueError(f"Reconstruction step counts must be positive, got {step_count}")
+        if step_count not in step_counts:
+            step_counts.append(step_count)
+    if primary_steps not in step_counts:
+        step_counts.insert(0, primary_steps)
+    return step_counts
+
+
+def _reconstruction_path(recon_dir: Path, stem: str, step_count: int, primary_steps: int) -> Path:
+    if step_count == primary_steps:
+        return recon_dir / f"{stem}_ddim_reconstruction.png"
+    return recon_dir / f"{stem}_ddim_reconstruction_{step_count}steps.png"
+
+
 def _merge_single_attribute_predictions(
     predictions_by_attr: dict[str, list[dict[str, object]]],
     image_paths: list[str],
@@ -73,6 +94,7 @@ def main() -> None:
     image_dir = ensure_dir(output_root / "images")
     recon_dir = ensure_dir(output_root / "reconstructions")
     grid_dir = ensure_dir(output_root / "grids")
+    diagnostics_dir = ensure_dir(output_root / "guidance_diagnostics")
 
     dataset = CelebAAttributeDataset(
         image_dir=dataset_cfg["image_dir"],
@@ -100,6 +122,7 @@ def main() -> None:
         model_id=diffusion_cfg.get("model_id", "google/ddpm-celebahq-256"),
         device=device,
         use_fp16=bool(diffusion_cfg.get("use_fp16", True)),
+        clip_sample=bool(diffusion_cfg.get("clip_sample", False)),
     )
     print(f"Loaded unconditional Diffusers model: {diffusion_cfg.get('model_id', 'google/ddpm-celebahq-256')}")
 
@@ -108,6 +131,10 @@ def main() -> None:
     guidance_scales = [float(value) for value in editing_cfg["guidance_scales"]]
     target_values = editing_cfg["target_values"]
     image_size = int(dataset_cfg.get("image_size", 256))
+    primary_inference_steps = int(diffusion_cfg.get("num_inference_steps", 50))
+    primary_inversion_steps = int(diffusion_cfg.get("num_inversion_steps", primary_inference_steps))
+    reconstruction_step_counts = _configured_reconstruction_step_counts(diffusion_cfg)
+    save_guidance_diagnostics = bool(editing_cfg.get("save_guidance_diagnostics", True))
 
     for local_index in range(len(subset)):
         batch = subset[local_index]
@@ -121,17 +148,42 @@ def main() -> None:
             backbone.unet,
             copy.deepcopy(backbone.inverse_scheduler),
             image,
-            num_inversion_steps=int(diffusion_cfg.get("num_inversion_steps", 50)),
+            num_inversion_steps=primary_inversion_steps,
             device=device,
         )
         reconstruction = ddim_reconstruct(
             backbone.unet,
             copy.deepcopy(backbone.scheduler),
             x_t,
-            num_inference_steps=int(diffusion_cfg.get("num_inference_steps", 50)),
+            num_inference_steps=primary_inference_steps,
             device=device,
         )
-        reconstruction_path = save_tensor_image(reconstruction[0], recon_dir / f"{stem}_ddim_reconstruction.png")
+        reconstruction_path = save_tensor_image(
+            reconstruction[0],
+            _reconstruction_path(recon_dir, stem, primary_inference_steps, primary_inference_steps),
+        )
+
+        for diagnostic_steps in reconstruction_step_counts:
+            if diagnostic_steps == primary_inference_steps and diagnostic_steps == primary_inversion_steps:
+                continue
+            diagnostic_x_t = ddim_invert(
+                backbone.unet,
+                copy.deepcopy(backbone.inverse_scheduler),
+                image,
+                num_inversion_steps=diagnostic_steps,
+                device=device,
+            )
+            diagnostic_reconstruction = ddim_reconstruct(
+                backbone.unet,
+                copy.deepcopy(backbone.scheduler),
+                diagnostic_x_t,
+                num_inference_steps=diagnostic_steps,
+                device=device,
+            )
+            save_tensor_image(
+                diagnostic_reconstruction[0],
+                _reconstruction_path(recon_dir, stem, diagnostic_steps, primary_inference_steps),
+            )
 
         for target_attr in target_attributes:
             classifier = target_classifiers[target_attr]
@@ -139,6 +191,8 @@ def main() -> None:
             target_idx = 0
             target_records_start = len(records)
             for guidance_scale in guidance_scales:
+                guidance_diagnostics: list[dict[str, float]] | None
+                guidance_diagnostics = [] if save_guidance_diagnostics else None
                 sample = classifier_guided_ddim_sample(
                     unet=backbone.unet,
                     scheduler=copy.deepcopy(backbone.scheduler),
@@ -149,13 +203,24 @@ def main() -> None:
                     guidance_scale=guidance_scale,
                     num_guidance_steps_per_timestep=int(editing_cfg.get("num_guidance_steps_per_timestep", 1)),
                     guidance_start_step=int(editing_cfg.get("guidance_start_step", 0)),
-                    guidance_end_step=int(editing_cfg.get("guidance_end_step", diffusion_cfg.get("num_inference_steps", 50))),
+                    guidance_end_step=int(editing_cfg.get("guidance_end_step", primary_inference_steps)),
                     device=device,
                     clamp_x0=bool(editing_cfg.get("clamp_x0", True)),
                     guidance_on_x0_pred=bool(editing_cfg.get("guidance_on_x0_pred", True)),
                     use_amp=bool(diffusion_cfg.get("use_amp", True)),
-                    num_inference_steps=int(diffusion_cfg.get("num_inference_steps", 50)),
+                    num_inference_steps=primary_inference_steps,
+                    diagnostics=guidance_diagnostics,
                 )
+                diagnostics_path = ""
+                if guidance_diagnostics is not None:
+                    diagnostics_path = str(
+                        diagnostics_dir
+                        / f"{stem}_{target_attr}_value{target_value}_guidance{guidance_scale:g}_diagnostics.csv"
+                    )
+                    write_dicts_csv(guidance_diagnostics, diagnostics_path)
+                reconstruction_delta = (sample - reconstruction).detach().float()
+                reconstruction_mse = float(reconstruction_delta.square().mean().cpu().item())
+                reconstruction_max_abs_delta = float(reconstruction_delta.abs().amax().cpu().item())
                 edited_path = save_tensor_image(
                     sample[0],
                     image_dir / f"{stem}_{target_attr}_value{target_value}_guidance{guidance_scale:g}.png",
@@ -169,11 +234,16 @@ def main() -> None:
                         "target_attribute": target_attr,
                         "target_value": target_value,
                         "guidance_scale": guidance_scale,
-                        "num_inference_steps": int(diffusion_cfg.get("num_inference_steps", 50)),
-                        "num_inversion_steps": int(diffusion_cfg.get("num_inversion_steps", 50)),
+                        "guidance_diagnostics_path": diagnostics_path,
+                        "reconstruction_to_edited_mse": reconstruction_mse,
+                        "reconstruction_to_edited_max_abs_delta": reconstruction_max_abs_delta,
+                        "num_inference_steps": primary_inference_steps,
+                        "num_inversion_steps": primary_inversion_steps,
                     }
                 )
-            if bool(visualization_cfg.get("save_grids", True)) and local_index < int(visualization_cfg.get("max_visualization_images", 16)):
+            save_grids = bool(visualization_cfg.get("save_grids", True))
+            within_visualization_limit = local_index < int(visualization_cfg.get("max_visualization_images", 16))
+            if save_grids and within_visualization_limit:
                 target_records = records[target_records_start:]
                 save_guidance_grid(
                     original_path=original_path,
