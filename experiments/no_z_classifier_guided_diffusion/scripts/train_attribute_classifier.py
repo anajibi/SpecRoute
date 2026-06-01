@@ -25,10 +25,21 @@ from diffae_latent_probe.src.models.attribute_classifier import (  # noqa: E402
 )
 
 
-def _target_attr_names(cfg: dict) -> list[str]:
+def _safe_attribute_name(attribute: str) -> str:
+    return attribute.replace("/", "_").replace(" ", "_")
+
+
+def _target_attr_names(cfg: dict, target_attribute: str | None = None) -> list[str]:
     target_attrs = list(cfg.get("editing", {}).get("target_attributes", []))
-    if not target_attrs:
-        raise ValueError("editing.target_attributes must contain at least one attribute for the classifier.")
+    if target_attribute is not None:
+        if target_attribute not in target_attrs:
+            raise ValueError(f"{target_attribute!r} is not listed in editing.target_attributes: {target_attrs}")
+        return [target_attribute]
+    if len(target_attrs) != 1:
+        raise ValueError(
+            "The no-Z POC trains one binary classifier per edited attribute. "
+            "Pass target_attribute when multiple editing.target_attributes are configured."
+        )
     return target_attrs
 
 
@@ -134,14 +145,15 @@ def _build_val_loader(dataset_cfg: dict, classifier_cfg: dict, attr_names: list[
     )
 
 
-def train_or_load_classifier(cfg: dict, device: torch.device):
+def train_or_load_classifier(cfg: dict, device: torch.device, target_attribute: str | None = None):
     dataset_cfg = cfg["dataset"]
     classifier_cfg = cfg["classifier"]
-    output_dir = ensure_dir(EXPERIMENT_DIR / "outputs" / "attribute_classifier")
+    attr_names = _target_attr_names(cfg, target_attribute=target_attribute)
+    classifier_name = _safe_attribute_name(attr_names[0])
+    output_dir = ensure_dir(EXPERIMENT_DIR / "outputs" / "attribute_classifier" / classifier_name)
     checkpoint_path = output_dir / "attribute_classifier.pt"
     metadata_path = output_dir / "metadata.json"
     metrics_path = output_dir / "validation_metrics.csv"
-    attr_names = _target_attr_names(cfg)
 
     if checkpoint_path.exists() and not bool(classifier_cfg.get("retrain", False)):
         payload = torch.load(checkpoint_path, map_location="cpu")
@@ -159,7 +171,7 @@ def train_or_load_classifier(cfg: dict, device: torch.device):
                 evaluate_attribute_classifier(model, val_loader, attr_names, device, metrics_path)
             return model, attr_names, checkpoint_path, True
         print(
-            "Cached classifier attributes do not match editing.target_attributes; "
+            "Cached classifier attribute does not match requested target attribute; "
             f"retraining classifier for {attr_names}."
         )
 
@@ -222,10 +234,14 @@ def main() -> None:
     cfg = load_yaml(args.config)
     set_seed(int(cfg["experiment"].get("seed", 42)))
     device = resolve_device(cfg["experiment"].get("device", "cuda"))
-    _, attr_names, checkpoint_path, loaded = train_or_load_classifier(cfg, device)
-    action = "Loaded" if loaded else "Trained and saved"
-    print(f"{action} classifier checkpoint: {checkpoint_path}")
-    print(f"Classifier attributes: {', '.join(attr_names)}")
+    target_attrs = list(cfg.get("editing", {}).get("target_attributes", []))
+    if not target_attrs:
+        raise ValueError("editing.target_attributes must contain at least one attribute.")
+    for target_attr in target_attrs:
+        _, attr_names, checkpoint_path, loaded = train_or_load_classifier(cfg, device, target_attribute=target_attr)
+        action = "Loaded" if loaded else "Trained and saved"
+        print(f"{action} classifier checkpoint: {checkpoint_path}")
+        print(f"Classifier attribute: {attr_names[0]}")
 
 
 if __name__ == "__main__":
