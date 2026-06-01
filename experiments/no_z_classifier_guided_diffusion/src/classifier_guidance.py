@@ -31,6 +31,31 @@ def _normalize_gradient(gradient: torch.Tensor, eps: float = 1e-8) -> torch.Tens
     return normalized.to(dtype=gradient.dtype)
 
 
+def _smooth_gradient(gradient: torch.Tensor, kernel_size: int) -> torch.Tensor:
+    if kernel_size <= 1:
+        return gradient
+    if kernel_size % 2 == 0:
+        raise ValueError(f"gradient_smoothing_kernel must be odd, got {kernel_size}")
+    if gradient.ndim != 4:
+        return gradient
+    gradient_float = gradient.float()
+    smoothed = F.avg_pool2d(gradient_float, kernel_size=kernel_size, stride=1, padding=kernel_size // 2)
+    return smoothed.to(dtype=gradient.dtype)
+
+
+def _rms(tensor: torch.Tensor) -> torch.Tensor:
+    reduce_dims = tuple(range(1, tensor.ndim))
+    return tensor.float().square().mean(dim=reduce_dims, keepdim=True).sqrt()
+
+
+def _cap_update_rms(update: torch.Tensor, max_update_rms: float | None, eps: float = 1e-8) -> torch.Tensor:
+    if max_update_rms is None or max_update_rms <= 0:
+        return update
+    update_rms = _rms(update).clamp_min(eps)
+    scale = (float(max_update_rms) / update_rms).clamp_max(1.0)
+    return (update.float() * scale).to(dtype=update.dtype)
+
+
 def _alpha_cumprod_for_timestep(scheduler, timestep: torch.Tensor | int, device: torch.device) -> float | None:
     signal_schedule = getattr(scheduler, "al" + "phas_cumprod", None)
     if signal_schedule is None:
@@ -155,6 +180,8 @@ def classifier_guided_ddim_sample(
     use_amp: bool = True,
     num_inference_steps: int = 50,
     guidance_step_size: float = 1.0,
+    max_guidance_update_rms: float | None = None,
+    gradient_smoothing_kernel: int = 1,
     max_guided_sample_abs: float | None = None,
     min_guidance_alpha_cumprod: float = 0.0,
     skip_nonfinite_guidance: bool = True,
@@ -235,6 +262,7 @@ def classifier_guided_ddim_sample(
                     )
                     sample = _to_unet_dtype(sample.detach().to(dtype=compute_dtype), unet)
                     continue
+                gradient = _smooth_gradient(gradient, int(gradient_smoothing_kernel))
                 gradient = _normalize_gradient(gradient)
                 if not torch.isfinite(gradient).all():
                     if not skip_nonfinite_guidance:
@@ -256,6 +284,7 @@ def classifier_guided_ddim_sample(
                     continue
                 sample_before = sample.detach()
                 guidance_update = float(guidance_scale) * float(guidance_step_size) * gradient
+                guidance_update = _cap_update_rms(guidance_update, max_guidance_update_rms)
                 sample_after = sample - guidance_update
                 if max_guided_sample_abs is not None:
                     sample_after = sample_after.clamp(-float(max_guided_sample_abs), float(max_guided_sample_abs))
