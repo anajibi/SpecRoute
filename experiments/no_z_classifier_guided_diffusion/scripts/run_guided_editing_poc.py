@@ -94,6 +94,7 @@ def main() -> None:
     image_dir = ensure_dir(output_root / "images")
     recon_dir = ensure_dir(output_root / "reconstructions")
     grid_dir = ensure_dir(output_root / "grids")
+    diagnostics_dir = ensure_dir(output_root / "guidance_diagnostics")
 
     dataset = CelebAAttributeDataset(
         image_dir=dataset_cfg["image_dir"],
@@ -133,6 +134,7 @@ def main() -> None:
     primary_inference_steps = int(diffusion_cfg.get("num_inference_steps", 50))
     primary_inversion_steps = int(diffusion_cfg.get("num_inversion_steps", primary_inference_steps))
     reconstruction_step_counts = _configured_reconstruction_step_counts(diffusion_cfg)
+    save_guidance_diagnostics = bool(editing_cfg.get("save_guidance_diagnostics", True))
 
     for local_index in range(len(subset)):
         batch = subset[local_index]
@@ -189,6 +191,8 @@ def main() -> None:
             target_idx = 0
             target_records_start = len(records)
             for guidance_scale in guidance_scales:
+                guidance_diagnostics: list[dict[str, float | str]] | None
+                guidance_diagnostics = [] if save_guidance_diagnostics else None
                 sample = classifier_guided_ddim_sample(
                     unet=backbone.unet,
                     scheduler=copy.deepcopy(backbone.scheduler),
@@ -205,7 +209,22 @@ def main() -> None:
                     guidance_on_x0_pred=bool(editing_cfg.get("guidance_on_x0_pred", True)),
                     use_amp=bool(diffusion_cfg.get("use_amp", True)),
                     num_inference_steps=primary_inference_steps,
+                    guidance_step_size=float(editing_cfg.get("guidance_step_size", 0.05)),
+                    max_guided_sample_abs=editing_cfg.get("max_guided_sample_abs", 10.0),
+                    min_guidance_alpha_cumprod=float(editing_cfg.get("min_guidance_alpha_cumprod", 1.0e-3)),
+                    skip_nonfinite_guidance=bool(editing_cfg.get("skip_nonfinite_guidance", True)),
+                    diagnostics=guidance_diagnostics,
                 )
+                diagnostics_path = ""
+                if guidance_diagnostics is not None:
+                    diagnostics_path = str(
+                        diagnostics_dir
+                        / f"{stem}_{target_attr}_value{target_value}_guidance{guidance_scale:g}_diagnostics.csv"
+                    )
+                    write_dicts_csv(guidance_diagnostics, diagnostics_path)
+                reconstruction_delta = (sample - reconstruction).detach().float()
+                reconstruction_mse = float(reconstruction_delta.square().mean().cpu().item())
+                reconstruction_max_abs_delta = float(reconstruction_delta.abs().amax().cpu().item())
                 edited_path = save_tensor_image(
                     sample[0],
                     image_dir / f"{stem}_{target_attr}_value{target_value}_guidance{guidance_scale:g}.png",
@@ -219,11 +238,16 @@ def main() -> None:
                         "target_attribute": target_attr,
                         "target_value": target_value,
                         "guidance_scale": guidance_scale,
+                        "guidance_diagnostics_path": diagnostics_path,
+                        "reconstruction_to_edited_mse": reconstruction_mse,
+                        "reconstruction_to_edited_max_abs_delta": reconstruction_max_abs_delta,
                         "num_inference_steps": primary_inference_steps,
                         "num_inversion_steps": primary_inversion_steps,
                     }
                 )
-            if bool(visualization_cfg.get("save_grids", True)) and local_index < int(visualization_cfg.get("max_visualization_images", 16)):
+            save_grids = bool(visualization_cfg.get("save_grids", True))
+            within_visualization_limit = local_index < int(visualization_cfg.get("max_visualization_images", 16))
+            if save_grids and within_visualization_limit:
                 target_records = records[target_records_start:]
                 save_guidance_grid(
                     original_path=original_path,
