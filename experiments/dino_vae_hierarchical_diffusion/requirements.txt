@@ -1,0 +1,9 @@
+torch>=2.1
+torchvision>=0.16
+diffusers>=0.25
+transformers>=4.36
+accelerate>=0.25
+PyYAML>=6.0
+Pillow>=10.0
+pytest>=7.4
+lpips>=0.1.4
