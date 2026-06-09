@@ -1,0 +1,64 @@
+{
+  "experiment_name": "hierarchical_latent_diffusion_k5_budget768",
+  "K": 5,
+  "dinov2": {
+    "variant": "vitb14",
+    "return_patches": false
+  },
+  "sd_vae": {
+    "model_id": "stabilityai/sd-vae-ft-ema"
+  },
+  "encoder": {
+    "input_dim": 768,
+    "level_dims": [
+      256,
+      192,
+      144,
+      112,
+      64
+    ],
+    "hidden_dim": 512,
+    "num_layers_per_encoder": 3,
+    "noise_std": 0.05,
+    "norm": "layernorm"
+  },
+  "decoder": {
+    "arch": "tokens",
+    "sd_latent_shape": [
+      4,
+      32,
+      32
+    ],
+    "hidden_dim": 512,
+    "num_transformer_layers": 6,
+    "num_heads": 8
+  },
+  "priors": {
+    "hidden_dim": 384,
+    "num_layers": 6,
+    "num_timesteps": 1000,
+    "schedule": "cosine"
+  },
+  "stage1": {
+    "epochs": 80,
+    "batch_size": 32,
+    "lr": 0.0002,
+    "lambda_img": 0.1,
+    "lambda_lpips": 0.05,
+    "lambda_compress": 0.0001
+  },
+  "stage2": {
+    "epochs": 300,
+    "batch_size": 64,
+    "lr": 0.0001
+  },
+  "dataset": {
+    "name": "celeba_hq_256",
+    "root": "datasets/celeba_hq_256",
+    "image_size": 256,
+    "num_workers": 4
+  },
+  "seed": 42,
+  "device": "cuda",
+  "output_dir": "outputs/k5_budget768"
+}

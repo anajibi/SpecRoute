@@ -1,0 +1,15 @@
+torch>=2.0
+torchvision
+diffusers>=0.27
+transformers>=4.36
+timm>=1.0
+einops
+pyyaml
+omegaconf
+lpips
+scipy
+scikit-learn
+matplotlib
+faiss-cpu
+pillow
+pytest
