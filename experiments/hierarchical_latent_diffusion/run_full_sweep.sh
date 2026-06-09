@@ -8,4 +8,5 @@ for K in 3 5 8; do
   python "$ROOT/scripts/train_stage2_priors.py" --config "$C"
   python "$ROOT/scripts/run_preservation_probe.py" --config "$C"
   python "$ROOT/scripts/run_counterfactual_probe.py" --config "$C"
+  python "$ROOT/scripts/visualize_hierarchy.py" --config "$C"
 done
