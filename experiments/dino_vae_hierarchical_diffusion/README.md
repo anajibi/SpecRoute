@@ -33,3 +33,7 @@ Although attributes are returned by the CelebA dataset for probes and analysis, 
 ## Stage 1 completion and checkpointing
 
 `train_stage1_autoencoder.py` is a finite training command: after the requested epochs it saves `outputs/<k>/checkpoints/stage1.pt` and exits. Checkpoint preparation can briefly look idle because all trainable weights must synchronize from GPU to CPU before they are written. The script now prints separate **preparing**, **writing**, and **complete** messages, reports the final checkpoint size/path, and prints the next latent-extraction command. Checkpoints are written atomically so an interrupted save does not leave a partial `stage1.pt`.
+
+## Simplified Stage 1 objective
+
+Stage 1 is intentionally VAE-only: it does not load or run DINOv2, train S0, decode images through the VAE, or compute image/high-pass losses. It trains the VAE evidence hierarchy and deterministic latent decoder using only latent-space L1 reconstruction plus the configured KL term. The evidence pyramid supplies zero-valued DINO-shaped tensors so the existing hierarchy encoder interface remains unchanged. DINO-backed extraction and later experiment stages remain available separately.

@@ -11,7 +11,7 @@ from dino_vae_hierarchical_diffusion.src.datasets import image_loader
 from dino_vae_hierarchical_diffusion.src.utils import build_trainable, levels, load_config
 
 
-def setup(args, trainable=True):
+def setup(args, trainable=True, use_dino=True):
     config = load_config(args.config)
     device = torch.device(config["device"] if torch.cuda.is_available() else "cpu")
     loader = image_loader(
@@ -21,14 +21,14 @@ def setup(args, trainable=True):
         shuffle=getattr(args, "shuffle", None),
     )
     vae = FrozenSDVAE(config["backbones"]["vae_model_id"]).to(device)
-    dino = FrozenDINOv2(config["backbones"]["dino_variant"]).to(device)
+    dino = FrozenDINOv2(config["backbones"]["dino_variant"]).to(device) if use_dino else None
     modules = build_trainable(config["hierarchy"]["K"]) if trainable else ()
     return config, device, loader, vae, dino, tuple(module.to(device) for module in modules)
 
 
 def encode(x, vae, dino, evidence, encoder):
     z0 = vae.encode(x)
-    dino_cls, dino_map = dino(x)
+    dino_cls, dino_map = (None, None) if dino is None else dino(x)
     return z0, encoder(evidence(z0, dino_cls, dino_map))
 
 

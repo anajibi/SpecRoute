@@ -1,4 +1,4 @@
-"""Train the hierarchy and final latent decoder, then save a Stage 1 checkpoint."""
+"""Train the VAE-only hierarchy and deterministic latent decoder."""
 import argparse
 import time
 
@@ -6,7 +6,7 @@ import torch
 from torch.nn import functional as F
 
 from _common import checkpoint_path, encode, setup
-from dino_vae_hierarchical_diffusion.src.losses import highpass, kl_loss
+from dino_vae_hierarchical_diffusion.src.losses import kl_loss
 from dino_vae_hierarchical_diffusion.src.utils import atomic_torch_save, cpu_state_dict, ensure_output, levels, seed_all
 
 parser = argparse.ArgumentParser()
@@ -16,11 +16,11 @@ parser.add_argument("--epochs", type=int)
 parser.add_argument("--split")
 args = parser.parse_args()
 
-config, device, loader, vae, dino, (evidence, encoder, deterministic, s0) = setup(args)
+config, device, loader, vae, dino, (evidence, encoder, deterministic, _) = setup(args, use_dino=False)
 seed_all(config["seed"])
 k = config["hierarchy"]["K"]
 output_dir = ensure_output(config)
-modules = {"evidence": evidence, "encoder": encoder, "deterministic": deterministic, "s0": s0}
+modules = {"evidence": evidence, "encoder": encoder, "deterministic": deterministic}
 parameters = [parameter for module in modules.values() for parameter in module.parameters()]
 optimizer = torch.optim.AdamW(parameters, lr=config["optim"]["lr"])
 epochs = args.epochs or config["train"]["stage1_epochs"]
@@ -40,12 +40,8 @@ for epoch in range(epochs):
         z0, posterior = encode(image, vae, dino, evidence, encoder)
         hierarchy = levels(posterior, k)
         z0_deterministic = deterministic(*hierarchy)
-        image_deterministic = vae.decode(z0_deterministic)
         loss = (
-            s0.loss(z0, *hierarchy)
-            + F.l1_loss(z0_deterministic, z0)
-            + 0.1 * F.l1_loss(image_deterministic, image)
-            + 0.05 * F.l1_loss(highpass(image_deterministic), highpass(image))
+            F.l1_loss(z0_deterministic, z0)
             + config["loss"]["beta_kl"]
             * sum(kl_loss(posterior[f"mu{i}"], posterior[f"logvar{i}"]) for i in range(1, k + 1))
         )
