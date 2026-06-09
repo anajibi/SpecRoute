@@ -29,3 +29,7 @@ stage1:
 ```
 
 Although attributes are returned by the CelebA dataset for probes and analysis, Stage 1 and Stage 2 do **not** condition the hierarchy, priors, or decoder on them. Set `dataset.synthetic: true` for loader-level tests without image files. Latent extraction writes a batched `latents.pt` cache that can be read by `LatentDataset` during Stage 2.
+
+## Stage 1 completion and checkpointing
+
+`train_stage1_autoencoder.py` is a finite training command: after the requested epochs it saves `outputs/<k>/checkpoints/stage1.pt` and exits. Checkpoint preparation can briefly look idle because all trainable weights must synchronize from GPU to CPU before they are written. The script now prints separate **preparing**, **writing**, and **complete** messages, reports the final checkpoint size/path, and prints the next latent-extraction command. Checkpoints are written atomically so an interrupted save does not leave a partial `stage1.pt`.
