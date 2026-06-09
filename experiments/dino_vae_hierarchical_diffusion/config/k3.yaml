@@ -1,0 +1,12 @@
+experiment_name: dino_vae_hld_k3
+seed: 42
+device: cuda
+dataset: {name: celeba_hq_256, root: data/celeba_hq_256, image_size: 256, batch_size: 32, num_workers: 4}
+backbones: {vae_model_id: stabilityai/sd-vae-ft-mse, dino_variant: dinov2_vitb14, freeze_vae: true, freeze_dino: true}
+hierarchy: {K: 3, z3_dim: 512, z2_channels: 128, z2_size: 8, z1_channels: 64, z1_size: 16}
+evidence: {f32_channels: 128, f16_channels: 256, f8_channels: 384, f4_channels: 512, dino_proj_channels: 256, global_dim: 512}
+decoder: {use_deterministic_decoder: true, use_diffusion_decoder: true, level_dropout: true}
+diffusion: {num_train_timesteps: 1000, schedule: cosine, prediction_type: epsilon, ddim_steps_eval: 50}
+loss: {lambda_diff_z0: 1.0, lambda_z0_det: 1.0, lambda_img_l1: 0.1, lambda_lpips: 0.05, lambda_hf: 0.05, beta_kl: 0.0001}
+optim: {lr: 0.0002, weight_decay: 0.01, grad_clip: 1.0, amp: true}
+train: {stage1_epochs: 80, stage2_epochs: 300, output_dir: outputs/k3}
