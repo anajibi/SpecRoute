@@ -11,4 +11,21 @@ python experiments/dino_vae_hierarchical_diffusion/scripts/extract_latents.py --
 python experiments/dino_vae_hierarchical_diffusion/scripts/train_stage2_priors.py --config experiments/dino_vae_hierarchical_diffusion/config/k3.yaml --epochs 2
 ```
 
-Set `dataset.root` to an image folder. Images are center-cropped and normalized to `[-1,1]`. The scripts automatically use CPU if CUDA is unavailable. Downloads of pretrained weights require network access. Edits produced here are **latent-space interventions/pseudo-counterfactuals**, not SCM counterfactuals.
+Configure CelebA metadata paths, explicit image paths, or a fallback `dataset.root` image folder. Images are resized to the configured square resolution and normalized to `[-1,1]`. The scripts automatically use CPU if CUDA is unavailable. Downloads of pretrained weights require network access. Edits produced here are **latent-space interventions/pseudo-counterfactuals**, not SCM counterfactuals.
+
+## Dataset configuration
+
+The image loader supports official CelebA attribute/partition files, explicit image paths, recursively discovered image folders, and deterministic synthetic images. The default configs use:
+
+```yaml
+dataset:
+  image_dir: /home/anajibi/HDM/diffae_latent_probe/data/raw_images/celeba-hq
+  attr_path: /home/anajibi/HDM/diffae_latent_probe/data/celeba-hq/list_attr_celeba.txt
+  partition_path: /home/anajibi/HDM/diffae_latent_probe/data/celeba-hq/list_eval_partition.txt
+  split: train
+  image_size: 256
+stage1:
+  batch_size: 32
+```
+
+Although attributes are returned by the CelebA dataset for probes and analysis, Stage 1 and Stage 2 do **not** condition the hierarchy, priors, or decoder on them. Set `dataset.synthetic: true` for loader-level tests without image files. Latent extraction writes a batched `latents.pt` cache that can be read by `LatentDataset` during Stage 2.

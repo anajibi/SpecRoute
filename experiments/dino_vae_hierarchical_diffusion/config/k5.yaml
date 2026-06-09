@@ -1,7 +1,16 @@
 experiment_name: dino_vae_hld_k5
 seed: 42
 device: cuda
-dataset: {name: celeba_hq_256, root: data/celeba_hq_256, image_size: 256, batch_size: 24, num_workers: 4}
+dataset:
+  name: celeba_hq_256
+  image_dir: /home/anajibi/HDM/diffae_latent_probe/data/raw_images/celeba-hq
+  attr_path: /home/anajibi/HDM/diffae_latent_probe/data/celeba-hq/list_attr_celeba.txt
+  partition_path: /home/anajibi/HDM/diffae_latent_probe/data/celeba-hq/list_eval_partition.txt
+  split: train
+  image_size: 256
+  num_workers: 4
+stage1:
+  batch_size: 24
 backbones: {vae_model_id: stabilityai/sd-vae-ft-mse, dino_variant: dinov2_vitb14, freeze_vae: true, freeze_dino: true}
 hierarchy: {K: 5, z5_dim: 512, z4_dim: 256, z3_channels: 128, z3_size: 4, z2_channels: 64, z2_size: 8, z1_channels: 64, z1_size: 16}
 evidence: {f32_channels: 128, f16_channels: 256, f8_channels: 384, f4_channels: 512, dino_proj_channels: 256, global_dim: 512}
