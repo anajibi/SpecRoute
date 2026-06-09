@@ -41,3 +41,19 @@ pytest -q experiments/hierarchical_latent_diffusion/tests
 * SD-VAE scaling is read from the model config and applied symmetrically.
 * Probe CSVs are append-only and written into the selected output directory.
 * Attribute classifiers and ArcFace are intentionally not bundled or altered; downstream users can join their frozen-model metrics to probe outputs by `image_id`.
+
+## CelebA-HQ attribute dataset
+
+The image pipeline natively supports CelebA-style attribute and partition files. Configure it as:
+
+```yaml
+dataset:
+  image_dir: /home/anajibi/HDM/diffae_latent_probe/data/raw_images/celeba-hq
+  attr_path: /home/anajibi/HDM/diffae_latent_probe/data/celeba-hq/list_attr_celeba.txt
+  partition_path: /home/anajibi/HDM/diffae_latent_probe/data/celeba-hq/list_eval_partition.txt
+  split: test
+  image_size: 256
+  num_workers: 4
+```
+
+Each image batch is a dictionary containing `image`, `attributes`, `image_id`, `image_path`, and `index`. Stage-one training and the default latent extraction explicitly use the `train` partition; preservation, counterfactual, and visualization scripts explicitly use `test`. Extracted latent files also retain `image_id`, selected `attr_names`, and the attribute tensor. Pass `--split test` to `extract_latents.py` when test-set latents are desired. If the partition file is omitted or missing, the configured split is not filtered.
