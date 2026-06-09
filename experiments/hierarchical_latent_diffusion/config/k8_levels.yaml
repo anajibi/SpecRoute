@@ -1,0 +1,69 @@
+{
+  "experiment_name": "hierarchical_latent_diffusion_k8_levels",
+  "K": 8,
+  "dinov2": {
+    "variant": "vitb14",
+    "return_patches": false
+  },
+  "sd_vae": {
+    "model_id": "stabilityai/sd-vae-ft-ema"
+  },
+  "encoder": {
+    "input_dim": 768,
+    "level_dims": [
+      512,
+      384,
+      256,
+      192,
+      128,
+      64,
+      32,
+      8
+    ],
+    "hidden_dim": 512,
+    "num_layers_per_encoder": 3,
+    "noise_std": 0.05,
+    "norm": "layernorm"
+  },
+  "decoder": {
+    "arch": "tokens",
+    "sd_latent_shape": [
+      4,
+      32,
+      32
+    ],
+    "hidden_dim": 512,
+    "num_transformer_layers": 6,
+    "num_heads": 8
+  },
+  "priors": {
+    "hidden_dim": 384,
+    "num_layers": 6,
+    "num_timesteps": 1000,
+    "schedule": "cosine"
+  },
+  "stage1": {
+    "epochs": 80,
+    "batch_size": 32,
+    "lr": 0.0002,
+    "lambda_img": 0.1,
+    "lambda_lpips": 0.05,
+    "lambda_compress": 0.0001
+  },
+  "stage2": {
+    "epochs": 300,
+    "batch_size": 64,
+    "lr": 0.0001
+  },
+  "dataset": {
+    "image_dir": "/home/anajibi/HDM/diffae_latent_probe/data/raw_images/celeba-hq",
+    "attr_path": "/home/anajibi/HDM/diffae_latent_probe/data/celeba-hq/list_attr_celeba.txt",
+    "partition_path": "/home/anajibi/HDM/diffae_latent_probe/data/celeba-hq/list_eval_partition.txt",
+    "split": "test",
+    "image_size": 256,
+    "num_workers": 4
+  },
+  "seed": 42,
+  "device": "cuda",
+  "output_dir": "outputs/k8_levels"
+}

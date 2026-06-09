@@ -9,7 +9,7 @@ The baseline tests whether direct classifier guidance during denoising can edit 
 ## Components
 
 - `config/no_z_classifier_guided_poc.yaml`: default proof-of-concept settings.
-- `scripts/train_attribute_classifier.py`: trains or loads the project CelebA attribute classifier.
+- `src/pretrained_attribute_classifier.py`: downloads and wraps the off-the-shelf pretrained CelebA attribute classifier used for guidance/evaluation.
 - `scripts/run_guided_editing_poc.py`: end-to-end DDIM inversion, classifier-guided editing, prediction, metric, and visualization driver.
 - `src/diffusion_backbone.py`: Hugging Face Diffusers loader for `google/ddpm-celebahq-256`; its DDIM schedulers disable intermediate predicted-x0 clipping by default because clipping during inversion/reconstruction is lossy.
 - `src/ddim_inversion.py`: deterministic DDIM inversion helpers.
@@ -40,7 +40,7 @@ The script writes outputs under `experiments/no_z_classifier_guided_diffusion/ou
 - `preservation_summary.csv`
 - `images/`, `reconstructions/`, `guidance_diagnostics/`, and `grids/`
 
-Classifier checkpoints are cached separately under `experiments/no_z_classifier_guided_diffusion/outputs/attribute_classifier/<attribute>/` unless `classifier.retrain: true` is set. Each classifier is a single-output binary predictor trained only for the one attribute currently being edited, not the full CelebA attribute set. Validation metrics are written to `outputs/attribute_classifier/<attribute>/validation_metrics.csv` after training. The default DDIM inversion/sampling step count is 500 to improve reconstruction and edit quality; lower it only for quick debugging because runtime scales roughly linearly with the number of steps.
+The editing driver no longer trains project-local per-attribute classifiers. By default, `classifier.provider: hf_torchvision_state_dict` downloads the pretrained `pymlex/celeba-gan-xai` CelebA attribute classifier from Hugging Face Hub and wraps its shared multi-output ResNet18 as a single-logit module for each target attribute. The configured guidance window uses fractions (`editing.guidance_start_fraction` and `editing.guidance_end_fraction`) that are resolved against `diffusion.num_inference_steps`; with the default 700 DDIM steps, the 30%-90% window becomes steps `[210, 630)`. Lower the DDIM step count only for quick debugging because runtime scales roughly linearly with the number of steps.
 
 For reconstruction-only debugging, edit `diffusion.reconstruction_step_counts` in the YAML. The driver re-runs inversion and denoising at each listed step count and saves extra files such as `*_ddim_reconstruction_500steps.png` under `reconstructions/`, without classifier guidance for those diagnostic images. Keep `diffusion.clip_sample: false` unless you are deliberately testing scheduler clipping artifacts; the final saved images are still clamped to the valid display range.
 

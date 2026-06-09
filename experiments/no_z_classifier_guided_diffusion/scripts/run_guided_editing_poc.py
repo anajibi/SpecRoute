@@ -14,12 +14,12 @@ for candidate in (REPO_ROOT, REPO_ROOT / "diffae_latent_probe", EXPERIMENT_DIR):
     if str(candidate) not in sys.path:
         sys.path.insert(0, str(candidate))
 
-from scripts.train_attribute_classifier import train_or_load_classifier  # noqa: E402
 from src.classifier_guidance import classifier_guided_ddim_sample  # noqa: E402
 from src.datasets import CelebAAttributeDataset, build_subset, write_dicts_csv  # noqa: E402
 from src.ddim_inversion import ddim_invert, ddim_reconstruct  # noqa: E402
 from src.diffusion_backbone import load_unconditional_celebahq_backbone  # noqa: E402
 from src.evaluation import compute_edit_metrics, predict_paths_to_csv  # noqa: E402
+from src.pretrained_attribute_classifier import load_pretrained_attribute_classifiers  # noqa: E402
 from src.utils import ensure_dir, image_file_stem, load_yaml, resolve_device, save_tensor_image, set_seed  # noqa: E402
 from src.visualization import save_guidance_grid  # noqa: E402
 
@@ -52,6 +52,27 @@ def _configured_reconstruction_step_counts(diffusion_cfg: dict) -> list[int]:
     if primary_steps not in step_counts:
         step_counts.insert(0, primary_steps)
     return step_counts
+
+
+def _resolve_guidance_window(editing_cfg: dict, num_inference_steps: int) -> tuple[int, int]:
+    def resolve_bound(step_key: str, fraction_key: str, default_fraction: float) -> int:
+        if fraction_key in editing_cfg:
+            fraction = float(editing_cfg[fraction_key])
+            if not 0.0 <= fraction <= 1.0:
+                raise ValueError(f"{fraction_key} must be in [0, 1], got {fraction}")
+            return int(round(fraction * num_inference_steps))
+        if step_key in editing_cfg:
+            return int(editing_cfg[step_key])
+        return int(round(default_fraction * num_inference_steps))
+
+    start_step = resolve_bound("guidance_start_step", "guidance_start_fraction", 0.30)
+    end_step = resolve_bound("guidance_end_step", "guidance_end_fraction", 0.90)
+    if not 0 <= start_step < end_step <= num_inference_steps:
+        raise ValueError(
+            "Invalid guidance window: "
+            f"start={start_step}, end={end_step}, num_inference_steps={num_inference_steps}"
+        )
+    return start_step, end_step
 
 
 def _reconstruction_path(recon_dir: Path, stem: str, step_count: int, primary_steps: int) -> Path:
@@ -106,17 +127,15 @@ def main() -> None:
     subset = build_subset(dataset, int(exp_cfg.get("num_images", 16)))
 
     target_attributes = list(editing_cfg["target_attributes"])
-    target_classifiers: dict[str, torch.nn.Module] = {}
-    attr_names: list[str] = []
-    for target_attr in target_attributes:
-        classifier, classifier_attr_names, classifier_checkpoint, classifier_loaded = train_or_load_classifier(
-            cfg, device, target_attribute=target_attr
-        )
-        if classifier_attr_names != [target_attr]:
-            raise ValueError(f"Expected a single-output classifier for {target_attr}, got {classifier_attr_names}")
-        target_classifiers[target_attr] = classifier
-        attr_names.append(target_attr)
-        print(f"Using {target_attr} classifier checkpoint: {classifier_checkpoint} (loaded={classifier_loaded})")
+    target_classifiers, classifier_info = load_pretrained_attribute_classifiers(
+        cfg.get("classifier", {}), target_attributes, device
+    )
+    attr_names = list(target_attributes)
+    print(
+        "Using pretrained attribute classifier "
+        f"{classifier_info.model_id}/{classifier_info.checkpoint_filename} "
+        f"({classifier_info.architecture}, attributes={classifier_info.attributes})"
+    )
 
     backbone = load_unconditional_celebahq_backbone(
         model_id=diffusion_cfg.get("model_id", "google/ddpm-celebahq-256"),
@@ -133,8 +152,10 @@ def main() -> None:
     image_size = int(dataset_cfg.get("image_size", 256))
     primary_inference_steps = int(diffusion_cfg.get("num_inference_steps", 50))
     primary_inversion_steps = int(diffusion_cfg.get("num_inversion_steps", primary_inference_steps))
+    guidance_start_step, guidance_end_step = _resolve_guidance_window(editing_cfg, primary_inference_steps)
     reconstruction_step_counts = _configured_reconstruction_step_counts(diffusion_cfg)
     save_guidance_diagnostics = bool(editing_cfg.get("save_guidance_diagnostics", True))
+    print(f"Resolved guidance window: steps [{guidance_start_step}, {guidance_end_step}) / {primary_inference_steps}")
 
     for local_index in range(len(subset)):
         batch = subset[local_index]
@@ -202,8 +223,8 @@ def main() -> None:
                     target_value=target_value,
                     guidance_scale=guidance_scale,
                     num_guidance_steps_per_timestep=int(editing_cfg.get("num_guidance_steps_per_timestep", 1)),
-                    guidance_start_step=int(editing_cfg.get("guidance_start_step", 0)),
-                    guidance_end_step=int(editing_cfg.get("guidance_end_step", primary_inference_steps)),
+                    guidance_start_step=guidance_start_step,
+                    guidance_end_step=guidance_end_step,
                     device=device,
                     clamp_x0=bool(editing_cfg.get("clamp_x0", True)),
                     guidance_on_x0_pred=bool(editing_cfg.get("guidance_on_x0_pred", True)),
