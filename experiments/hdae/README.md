@@ -18,3 +18,32 @@ pytest experiments/hdae/tests
 ```
 
 The preprocessor detects direct filename alignment (Case A) or requires a CelebA-HQ-to-CelebA mapping (Case B); it never silently joins by row index. The smoke test needs the configured source data and writes `smoke_grid.png` under `output_dir`.
+
+## Latent probing
+
+After training a reconstruction model, extract per-level semantic latents and train one linear binary classifier for each `(latent level, attribute)` pair:
+
+```bash
+python experiments/hdae/latent_probing/extract_latents.py \
+  --config experiments/hdae/configs/celeba64_hier_k3.yaml \
+  --ckpt <path> \
+  --output experiments/hdae/outputs/celeba64_hier_k3/latent_probing/latents.npz
+
+python experiments/hdae/latent_probing/train_linear_probes.py \
+  --latents experiments/hdae/outputs/celeba64_hier_k3/latent_probing/latents.npz \
+  --output-dir experiments/hdae/outputs/celeba64_hier_k3/latent_probing/probes
+```
+
+For 3 latent levels and 40 CelebA attributes this trains 120 independent linear classifiers and writes one metrics row per classifier.
+
+## Learned null-token ablations
+
+Each HDAE latent level owns one learned null token. During training, every level is independently replaced by its null token with probability `conditioning.latent_drop_prob` (default `0.12`). The null tokens are model parameters, so they are saved and loaded with checkpoints. At test time, use them to ablate selected semantic levels:
+
+```bash
+python experiments/hdae/latent_probing/reconstruct_with_nulls.py \
+  --config experiments/hdae/configs/celeba64_hier_k3.yaml \
+  --ckpt <path> \
+  --null-levels 0,2 \
+  --output experiments/hdae/outputs/celeba64_hier_k3/null_levels_0_2.png
+```

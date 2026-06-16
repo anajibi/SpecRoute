@@ -18,4 +18,8 @@ class HDAELitModule(LitModel):
         if zs:
             for i, z in enumerate(zs):
                 self.log(f"latent/norm_{i}", z.norm(dim=1).mean(), sync_dist=True)
+        null_mask = getattr(self.model, "last_null_mask", None)
+        if null_mask is not None:
+            for i in range(null_mask.shape[1]):
+                self.log(f"latent/null_rate_{i}", null_mask[:, i].float().mean(), sync_dist=True)
         return result

@@ -67,8 +67,8 @@ def load_hdae_config(path, require_data=True):
     e = EncoderHierarchyConfig(**raw["encoder"]);
     c = ConditioningConfig(**raw["conditioning"])
     if e.type not in {"flat", "hierarchical"}: raise ValueError("encoder.type must be flat or hierarchical")
-    if c.strategy == "concat_proj" and sum(e.level_dims) != c.style_ch: raise ValueError(
-        "sum(level_dims) must equal style_ch")
+    if c.strategy == "concat_proj" and sum(e.level_dims) != c.style_ch: raise ValueError("sum(level_dims) must equal style_ch")
+    if not 0 <= c.latent_drop_prob < 1: raise ValueError("conditioning.latent_drop_prob must be in [0, 1)")
     conf.style_ch = c.style_ch;
     hdae = HDAEConfig(e, c);
     conf.hdae_conf = hdae;

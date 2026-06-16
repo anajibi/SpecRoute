@@ -17,6 +17,7 @@ encoder:
 conditioning:
   strategy: concat_proj
   style_ch: 512
+  latent_drop_prob: 0.12
 train:
   batch_size_per_gpu: 32
   total_batch_size: 64
@@ -34,6 +35,6 @@ lightning:
   devices: 2
   strategy: cuda
   log_every_n_steps: 50
-  val_check_interval: 25
+  val_check_interval: 300
 seed: 42
 output_dir: experiments/hdae/outputs/celeba64_hier_k3
