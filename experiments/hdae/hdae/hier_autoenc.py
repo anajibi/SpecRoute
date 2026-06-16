@@ -23,11 +23,18 @@ class HierarchicalAutoencModel(BeatGANsAutoencModel):
         self.encoder = HierarchicalSemanticEncoder(enc_conf, e.tap_resolutions, e.level_dims,
                                                    e.pool, e.proj)
         c = hdae_conf.conditioning
-        self.merge = build_merger(c.strategy, e.level_dims, c.style_ch)
+        self.merge = build_merger(c.strategy, e.level_dims, c.style_ch, c.latent_drop_prob)
         self.hdae_conf = hdae_conf
         self.last_zs = None
 
-    def encode(self, x):
+    def encode(self, x, null_levels=None):
+        """Encode an image and optionally force selected latent levels to learned null tokens."""
         zs = self.encoder(x)
         self.last_zs = zs
-        return {"cond": self.merge(zs), "zs": zs}
+        cond, null_mask = self.merge(zs, null_levels=null_levels, return_mask=True)
+        self.last_null_mask = null_mask
+        return {"cond": cond, "zs": zs, "null_mask": null_mask}
+
+    def encode_with_nulls(self, x, null_levels):
+        """Convenience helper for test-time latent-level ablations."""
+        return self.encode(x, null_levels=null_levels)

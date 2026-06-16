@@ -16,6 +16,7 @@
 | `encoder.proj` | Head type: `linear` or two-layer `mlp`. |
 | `conditioning.strategy` | `concat_proj`; `per_resolution` is reserved/experimental. |
 | `conditioning.style_ch` | Decoder semantic conditioning width; must equal `sum(level_dims)`. |
+| `conditioning.latent_drop_prob` | Per-sample, per-level probability of replacing that latent with its learned null token during training; default `0.12`. |
 | `train.batch_size_per_gpu`, `total_batch_size` | Local/global batch; global must equal local times devices. |
 | `train.lr`, `ema_decay`, `T`, `T_eval` | Upstream learning rate, EMA, train diffusion steps, and DDIM evaluation steps. |
 | `train.max_steps`, `precision`, `grad_clip`, `num_workers` | Trainer/runtime settings. |

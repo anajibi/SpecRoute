@@ -17,6 +17,7 @@ encoder:
 conditioning:
   strategy: concat_proj
   style_ch: 512
+  latent_drop_prob: 0.12
 train:
   batch_size_per_gpu: 32
   total_batch_size: 64

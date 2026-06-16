@@ -35,3 +35,15 @@ python experiments/hdae/latent_probing/train_linear_probes.py \
 ```
 
 For 3 latent levels and 40 CelebA attributes this trains 120 independent linear classifiers and writes one metrics row per classifier.
+
+## Learned null-token ablations
+
+Each HDAE latent level owns one learned null token. During training, every level is independently replaced by its null token with probability `conditioning.latent_drop_prob` (default `0.12`). The null tokens are model parameters, so they are saved and loaded with checkpoints. At test time, use them to ablate selected semantic levels:
+
+```bash
+python experiments/hdae/latent_probing/reconstruct_with_nulls.py \
+  --config experiments/hdae/configs/celeba64_hier_k3.yaml \
+  --ckpt <path> \
+  --null-levels 0,2 \
+  --output experiments/hdae/outputs/celeba64_hier_k3/null_levels_0_2.png
+```

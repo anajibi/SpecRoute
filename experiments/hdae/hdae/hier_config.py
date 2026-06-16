@@ -18,6 +18,7 @@ class EncoderHierarchyConfig:
 class ConditioningConfig:
     strategy: str = "concat_proj"
     style_ch: int = 512
+    latent_drop_prob: float = 0.12
 
 
 @dataclass

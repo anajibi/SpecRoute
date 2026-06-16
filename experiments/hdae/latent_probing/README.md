@@ -27,3 +27,15 @@ Outputs:
 - `summary.json`: number of levels, attributes, and classifiers.
 
 The probes use partition labels from the packed dataset. If a packed dataset has incomplete partition labels, training falls back to a deterministic 80/10/10 split, matching the probe code path.
+
+## Null-token reconstruction ablations
+
+To inspect what happens when one or more semantic levels are removed, force those levels to use their learned null tokens and save an original/reconstruction grid:
+
+```bash
+python experiments/hdae/latent_probing/reconstruct_with_nulls.py \
+  --config experiments/hdae/configs/celeba64_hier_k3.yaml \
+  --ckpt <path-to-hdae.ckpt> \
+  --null-levels 1 \
+  --output experiments/hdae/outputs/celeba64_hier_k3/latent_probing/null_level_1.png
+```
