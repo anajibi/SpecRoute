@@ -39,3 +39,23 @@ python experiments/hdae/latent_probing/reconstruct_with_nulls.py \
   --null-levels 1 \
   --output experiments/hdae/outputs/celeba64_hier_k3/latent_probing/null_level_1.png
 ```
+
+## Pseudo-counterfactual preservation experiment
+
+The counterfactual workflow chooses a linear-probe direction for a target attribute, edits that latent level, decodes pseudo-counterfactual images, and measures all 40 attributes with an image classifier:
+
+```bash
+python experiments/hdae/counterfactuals/train_attr_classifier.py \
+  --config experiments/hdae/configs/celeba64_hier_k3.yaml \
+  --output experiments/hdae/outputs/celeba64_hier_k3/counterfactuals/attr_classifier.pt
+
+python experiments/hdae/counterfactuals/run_counterfactual_eval.py \
+  --config experiments/hdae/configs/celeba64_hier_k3.yaml \
+  --ckpt <path-to-hdae.ckpt> \
+  --probe-metrics experiments/hdae/outputs/celeba64_hier_k3/latent_probing/probes/probe_metrics.csv \
+  --probe-weights-dir experiments/hdae/outputs/celeba64_hier_k3/latent_probing/probes/weights \
+  --attr-classifier experiments/hdae/outputs/celeba64_hier_k3/counterfactuals/attr_classifier.pt \
+  --attribute Smiling \
+  --level best \
+  --output-dir experiments/hdae/outputs/celeba64_hier_k3/counterfactuals/Smiling
+```

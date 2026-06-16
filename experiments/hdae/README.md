@@ -47,3 +47,17 @@ python experiments/hdae/latent_probing/reconstruct_with_nulls.py \
   --null-levels 0,2 \
   --output experiments/hdae/outputs/celeba64_hier_k3/null_levels_0_2.png
 ```
+
+## One-command pipeline and pseudo-counterfactuals
+
+Run the full sequence (preprocess, train, reconstruct, extract latents, train linear probes, train an image attribute classifier, and evaluate a latent-direction pseudo-counterfactual):
+
+```bash
+python experiments/hdae/scripts/run_full_pipeline.py \
+  --config experiments/hdae/configs/celeba64_hier_k3.yaml \
+  --attribute Smiling \
+  --cf-level best \
+  --cf-strength 2.0
+```
+
+The counterfactual stage uses the selected linear-probe direction (for example `Smiling`) to edit one latent level, decodes pseudo-counterfactual images, then scores all 40 attributes with an image-space CelebA attribute classifier. It reports the target-attribute change and non-target preservation metrics so hierarchy sizes can be compared.
