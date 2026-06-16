@@ -47,3 +47,37 @@ python experiments/hdae/latent_probing/reconstruct_with_nulls.py \
   --null-levels 0,2 \
   --output experiments/hdae/outputs/celeba64_hier_k3/null_levels_0_2.png
 ```
+
+## One-command pipeline and pseudo-counterfactuals
+
+Run the full sequence (preprocess, train, reconstruct, extract latents, train linear probes, train an image attribute classifier, and evaluate a latent-direction pseudo-counterfactual):
+
+```bash
+python experiments/hdae/scripts/run_full_pipeline.py \
+  --config experiments/hdae/configs/celeba64_hier_k3.yaml \
+  --attribute Smiling \
+  --cf-level best \
+  --cf-strength 1.0 \
+  --num-cf-images 32
+```
+
+The counterfactual stage uses the selected linear-probe direction (for example `Smiling`) to edit one latent level, decodes pseudo-counterfactual images, then scores all 40 attributes with an image-space CelebA attribute classifier. It reports the target-attribute change and non-target preservation metrics so hierarchy sizes can be compared.
+
+## Swap/null diagnostic grid and probe analysis plots
+
+Generate a grid with source/donor rows, swap rows for `Z1`, `Z2`, `Z3`, `Z1+Z2`, `Z2+Z3`, and null-token rows for each of `Z1`, `Z2`, and `Z3`:
+
+```bash
+python experiments/hdae/latent_probing/swap_null_grid.py \
+  --config experiments/hdae/configs/celeba64_hier_k3.yaml \
+  --ckpt <path> \
+  --output experiments/hdae/outputs/celeba64_hier_k3/latent_probing/swap_null_grid.png
+```
+
+Analyze probe results with heatmaps and best-level summaries:
+
+```bash
+python experiments/hdae/latent_probing/analyze_probe_results.py \
+  --probe-metrics experiments/hdae/outputs/celeba64_hier_k3/latent_probing/probes/probe_metrics.csv \
+  --output-dir experiments/hdae/outputs/celeba64_hier_k3/latent_probing/analysis
+```

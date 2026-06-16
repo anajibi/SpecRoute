@@ -9,7 +9,7 @@ sys.path.insert(0, str(ROOT))
 
 import torch
 from torch.utils.data import DataLoader
-from torchvision.utils import save_image
+from experiments.hdae.hdae.grid_utils import save_labeled_grid
 
 from experiments.hdae.data.celeba_hq import CelebAHQPacked
 from experiments.hdae.hdae.config_io import load_hdae_config
@@ -40,8 +40,8 @@ def main():
         recon, encoded = reconstruct_batch_with_null_levels(module, x, levels, T=args.T or cfg.raw["train"]["T_eval"])
     output = Path(args.output); output.parent.mkdir(parents=True, exist_ok=True)
     # module.render returns [0, 1]; dataset x is [-1, 1]. Save originals followed by reconstructions.
-    grid = torch.cat([x.add(1).div(2), recon.clamp(0, 1)], dim=0)
-    save_image(grid, output, nrow=len(x))
+    save_labeled_grid([x.add(1).div(2).detach().cpu(), recon.clamp(0, 1).detach().cpu()],
+                      ["original", f"null_levels_{levels}"], output)
     mask = encoded["null_mask"].int().cpu().tolist()
     print({"output": str(output), "null_levels": levels, "null_mask_first_batch": mask})
 
