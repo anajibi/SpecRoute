@@ -359,10 +359,11 @@ class TrainConfig(BaseConfig):
             )
         elif self.model_name in [
                 ModelName.beatgans_autoenc,
+                ModelName.hier_autoenc,  # HDAE: added
         ]:
-            cls = BeatGANsAutoencConfig
+            cls = BeatGANsAutoencConfig if self.model_name == ModelName.beatgans_autoenc else __import__('experiments.hdae.hdae.hier_config', fromlist=['HierarchicalBeatGANsAutoencConfig']).HierarchicalBeatGANsAutoencConfig  # HDAE: added
             # supports both autoenc and vaeddpm
-            if self.model_name == ModelName.beatgans_autoenc:
+            if self.model_name in [ModelName.beatgans_autoenc, ModelName.hier_autoenc]:  # HDAE: added
                 self.model_type = ModelType.autoencoder
             else:
                 raise NotImplementedError()
@@ -419,6 +420,8 @@ class TrainConfig(BaseConfig):
                 latent_net_conf=latent_net_conf,
                 resnet_cond_channels=self.net_beatgans_resnet_cond_channels,
             )
+            if self.model_name == ModelName.hier_autoenc:  # HDAE: added
+                self.model_conf.hdae_conf = getattr(self, 'hdae_conf', None)
         else:
             raise NotImplementedError(self.model_name)
 

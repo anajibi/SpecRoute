@@ -1,0 +1,40 @@
+base_template: celeba64d2c_autoenc
+data:
+  image_dir: "/home/anajibi/HDM/diffae_latent_probe/data/raw_images/celeba-hq"
+  attr_path: "/home/anajibi/HDM/diffae_latent_probe/data/celeba-hq/list_attr_celeba.txt"
+  partition_path: "/home/anajibi/HDM/diffae_latent_probe/data/celeba-hq/list_eval_partition.txt"
+  image_size: 64
+  lmdb_path: "experiments/hdae/data/packed/celebahq_64.lmdb"
+  attr_npz: "experiments/hdae/data/packed/celebahq_64_attrs.npz"
+  flip_aug: true
+  resize_filter: bicubic
+encoder:
+  type: hierarchical
+  tap_resolutions: [4, 8, 16]
+  level_dims: [256, 192, 64]
+  pool: adaptive_avg
+  proj: linear
+conditioning:
+  strategy: concat_proj
+  style_ch: 512
+  latent_drop_prob: 0.12
+train:
+  batch_size_per_gpu: 32
+  total_batch_size: 64
+  lr: 1.0e-4
+  ema_decay: 0.9999
+  T: 1000
+  T_eval: 100
+  max_steps: 200000
+  precision: 16-mixed
+  grad_clip: 1.0
+  num_workers: 8
+  compile: false
+lightning:
+  accelerator: gpu
+  devices: 2
+  strategy: ddp
+  log_every_n_steps: 50
+  val_check_interval: 2000
+seed: 42
+output_dir: experiments/hdae/outputs/celeba64_hier_k3

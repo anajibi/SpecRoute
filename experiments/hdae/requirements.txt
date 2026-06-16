@@ -1,0 +1,4 @@
+# Install after the upstream requirements.txt.
+PyYAML
+lmdb
+Pillow
