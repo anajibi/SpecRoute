@@ -1,25 +1,14 @@
 import copy
 import json
-import os
 import re
 
-import numpy as np
-import pandas as pd
 import pytorch_lightning as pl
-import torch
-from numpy.lib.function_base import flip
 from pytorch_lightning import loggers as pl_loggers
 from pytorch_lightning.callbacks import *
-from torch import nn
-from torch.cuda import amp
-from torch.distributions import Categorical
 from torch.optim.optimizer import Optimizer
-from torch.utils.data.dataset import ConcatDataset, TensorDataset
+from torch.utils.data.dataset import TensorDataset
 from torchvision.utils import make_grid, save_image
 
-from config import *
-from dataset import *
-from dist_utils import *
 from lmdb_writer import *
 from metrics import *
 from renderer import *
@@ -408,7 +397,7 @@ class LitModel(pl.LightningModule):
         return {'loss': loss}
 
     def on_train_batch_end(self, outputs, batch, batch_idx: int,
-                           dataloader_idx: int) -> None:
+                           dataloader_idx=0) -> None:
         """
         after each training step ...
         """
@@ -448,6 +437,7 @@ class LitModel(pl.LightningModule):
         """
         put images to the tensorboard
         """
+
         def do(model,
                postfix,
                use_xstart,
@@ -576,6 +566,7 @@ class LitModel(pl.LightningModule):
         For, FID. It is a fast version with 5k images (gold standard is 50k).
         Don't use its results in the paper!
         """
+
         def fid(model, postfix):
             score = evaluate_fid(self.eval_sampler,
                                  model,
@@ -886,7 +877,7 @@ def train(conf: TrainConfig, gpus, nodes=1, mode: str = 'train'):
                                  save_last=True,
                                  save_top_k=1,
                                  every_n_train_steps=conf.save_every_samples //
-                                 conf.batch_size_effective)
+                                                     conf.batch_size_effective)
     checkpoint_path = f'{conf.logdir}/last.ckpt'
     print('ckpt path:', checkpoint_path)
     if os.path.exists(checkpoint_path):
@@ -918,7 +909,7 @@ def train(conf: TrainConfig, gpus, nodes=1, mode: str = 'train'):
     trainer = pl.Trainer(
         max_steps=conf.total_samples // conf.batch_size_effective,
         resume_from_checkpoint=resume,
-        gpus=gpus,
+        devices=gpus,
         num_nodes=nodes,
         accelerator=accelerator,
         precision=16 if conf.fp16 else 32,

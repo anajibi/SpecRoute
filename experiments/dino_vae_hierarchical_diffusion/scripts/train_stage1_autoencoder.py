@@ -1,9 +1,78 @@
-import argparse,torch
-from _common import *
-from dino_vae_hierarchical_diffusion.src.losses import kl_loss,highpass
-p=argparse.ArgumentParser();p.add_argument('--config',required=True);p.add_argument('--max_images',type=int);p.add_argument('--epochs',type=int);a=p.parse_args(); c,d,loader,vae,dino,(ev,en,det,s0)=setup(a); k=c['hierarchy']['K']; out=ensure_output(c); params=[*ev.parameters(),*en.parameters(),*det.parameters(),*s0.parameters()]; opt=torch.optim.AdamW(params,lr=c['optim']['lr'])
-for epoch in range(a.epochs or c['train']['stage1_epochs']):
- for batch in loader:
-  x=batch['image'].to(d); z,o=encode(x,vae,dino,ev,en); lv=levels(o,k); zd=det(*lv); xd=vae.decode(zd); loss=s0.loss(z,*lv)+torch.nn.functional.l1_loss(zd,z)+.1*torch.nn.functional.l1_loss(xd,x)+.05*torch.nn.functional.l1_loss(highpass(xd),highpass(x))+c['loss']['beta_kl']*sum(kl_loss(o['mu'+str(i)],o['logvar'+str(i)]) for i in range(1,k+1)); opt.zero_grad();loss.backward();torch.nn.utils.clip_grad_norm_(params,c['optim']['grad_clip']);opt.step()
- print(f'epoch={epoch+1} loss={loss.item():.4f}')
-(out/'checkpoints').mkdir(parents=True,exist_ok=True); torch.save({'evidence':ev.state_dict(),'encoder':en.state_dict(),'deterministic':det.state_dict(),'s0':s0.state_dict(),'config':c},checkpoint_path(out,'stage1.pt'))
+"""Train the VAE-only hierarchy and deterministic latent decoder."""
+import argparse
+import time
+
+import torch
+from torch.nn import functional as F
+
+from _common import checkpoint_path, encode, setup
+from dino_vae_hierarchical_diffusion.src.losses import kl_loss
+from dino_vae_hierarchical_diffusion.src.utils import atomic_torch_save, cpu_state_dict, ensure_output, levels, seed_all
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--config", required=True)
+parser.add_argument("--max_images", type=int)
+parser.add_argument("--epochs", type=int)
+parser.add_argument("--split")
+args = parser.parse_args()
+
+config, device, loader, vae, dino, (evidence, encoder, deterministic, _) = setup(args, use_dino=False)
+seed_all(config["seed"])
+k = config["hierarchy"]["K"]
+output_dir = ensure_output(config)
+modules = {"evidence": evidence, "encoder": encoder, "deterministic": deterministic}
+parameters = [parameter for module in modules.values() for parameter in module.parameters()]
+optimizer = torch.optim.AdamW(parameters, lr=config["optim"]["lr"])
+epochs = args.epochs or config["train"]["stage1_epochs"]
+global_step = 0
+if len(loader) == 0:
+    raise RuntimeError("Stage 1 received an empty dataset; check dataset paths, split, and --max_images.")
+
+print(
+    f"Stage 1 starting: epochs={epochs}, images={len(loader.dataset)}, batches/epoch={len(loader)}, "
+    f"device={device}, output={output_dir}",
+    flush=True,
+)
+for epoch in range(epochs):
+    epoch_loss = 0.0
+    for batch in loader:
+        image = batch["image"].to(device)
+        z0, posterior = encode(image, vae, dino, evidence, encoder)
+        hierarchy = levels(posterior, k)
+        z0_deterministic = deterministic(*hierarchy)
+        loss = (
+            F.l1_loss(z0_deterministic, z0)
+            + config["loss"]["beta_kl"]
+            * sum(kl_loss(posterior[f"mu{i}"], posterior[f"logvar{i}"]) for i in range(1, k + 1))
+        )
+        optimizer.zero_grad(set_to_none=True)
+        loss.backward()
+        torch.nn.utils.clip_grad_norm_(parameters, config["optim"]["grad_clip"])
+        optimizer.step()
+        epoch_loss += loss.item()
+        global_step += 1
+    print(f"epoch={epoch + 1}/{epochs} mean_loss={epoch_loss / len(loader):.4f}", flush=True)
+
+checkpoint = checkpoint_path(output_dir, "stage1.pt")
+print(f"Training complete. Preparing CPU checkpoint: {checkpoint}", flush=True)
+prepare_started = time.monotonic()
+payload = {
+    **{name: cpu_state_dict(module) for name, module in modules.items()},
+    "config": config,
+    "epoch": epochs,
+    "global_step": global_step,
+}
+print(f"CPU checkpoint prepared in {time.monotonic() - prepare_started:.1f}s. Writing to disk...", flush=True)
+save_started = time.monotonic()
+atomic_torch_save(payload, checkpoint)
+size_mib = checkpoint.stat().st_size / (1024 * 1024)
+print(
+    f"Stage 1 complete. Saved checkpoint to {checkpoint} ({size_mib:.1f} MiB) "
+    f"in {time.monotonic() - save_started:.1f}s.",
+    flush=True,
+)
+print(
+    "Next: python experiments/dino_vae_hierarchical_diffusion/scripts/extract_latents.py "
+    f"--config {args.config}" + (f" --max_images {args.max_images}" if args.max_images else ""),
+    flush=True,
+)
