@@ -58,6 +58,8 @@ python experiments/hdae/scripts/run_full_pipeline.py \
   --attribute Smiling \
   --cf-level best \
   --cf-strength 2.0
+
+# The pipeline skips completed stages by default; add --force to rerun them.
 ```
 
 The counterfactual stage uses the selected linear-probe direction (for example `Smiling`) to edit one latent level, decodes pseudo-counterfactual images, then scores all 40 attributes with an image-space CelebA attribute classifier. It reports the target-attribute change and non-target preservation metrics so hierarchy sizes can be compared.
