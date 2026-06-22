@@ -1,9 +1,10 @@
 #!/usr/bin/env python
 """Generate a diagnostic grid for HDAE latent swaps and learned null tokens.
 
-Rows are: originals, donors, swap Z1, swap Z2, swap Z3, swap Z1+Z2,
-swap Z2+Z3, null Z1, null Z2, null Z3. Level indices are zero-based in code
-but labeled as Z1/Z2/Z3 for readability.
+The row set is generated from the configured number of semantic latent levels:
+source, donor, every single-level swap, every adjacent-pair swap, and every
+single-level null-token ablation. Level indices are zero-based in code but
+labeled as Z1..ZK for readability.
 """
 import argparse, json, logging, sys
 from pathlib import Path
@@ -19,24 +20,25 @@ from experiments.hdae.hdae.lit_module import HDAELitModule
 
 logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(message)s")
 
-SWAP_ROWS = [
-    ("swap_Z1", [0]),
-    ("swap_Z2", [1]),
-    ("swap_Z3", [2]),
-    ("swap_Z1_Z2", [0, 1]),
-    ("swap_Z2_Z3", [1, 2]),
-]
-NULL_ROWS = [
-    ("null_Z1", [0]),
-    ("null_Z2", [1]),
-    ("null_Z3", [2]),
-]
+def z_label(level):
+    return f"Z{level + 1}"
 
 
-def validate_three_levels(model):
-    num_levels = len(model.hdae_conf.encoder.level_dims)
-    if num_levels < 3:
-        raise ValueError(f"swap/null grid needs at least 3 latent levels, got {num_levels}")
+def dynamic_swap_rows(num_levels):
+    """Return single-level and adjacent-pair swap rows for an arbitrary K."""
+    if num_levels < 1:
+        raise ValueError("swap/null grid needs at least one latent level")
+    rows = [(f"swap_{z_label(i)}", [i]) for i in range(num_levels)]
+    rows.extend((f"swap_{z_label(i)}_{z_label(i + 1)}", [i, i + 1])
+                for i in range(num_levels - 1))
+    return rows
+
+
+def dynamic_null_rows(num_levels):
+    """Return one learned-null-token ablation row per latent level."""
+    if num_levels < 1:
+        raise ValueError("swap/null grid needs at least one latent level")
+    return [(f"null_{z_label(i)}", [i]) for i in range(num_levels)]
 
 
 def merge_from_levels(model, zs):
@@ -68,7 +70,9 @@ def main():
         raise ValueError("dataset must provide at least 2 * num_images examples for source/donor swaps")
     module = HDAELitModule.load_from_checkpoint(args.ckpt, conf=cfg.train_conf, map_location="cpu").to(device).eval()
     model = module.ema_model
-    validate_three_levels(model)
+    num_levels = len(model.hdae_conf.encoder.level_dims)
+    swap_rows = dynamic_swap_rows(num_levels)
+    null_rows = dynamic_null_rows(num_levels)
     x_src = batch["img"][:args.num_images].to(device)
     x_donor = batch["img"][args.num_images:args.num_images * 2].to(device)
     T = args.T or cfg.raw["train"]["T_eval"]
@@ -78,17 +82,17 @@ def main():
         src = model.encode(x_src)
         donor = model.encode(x_donor)
         x_t = module.encode_stochastic(x_src, src["cond"], T=T)
-        for label, levels in SWAP_ROWS:
+        for label, levels in swap_rows:
             logging.info("rendering %s using donor levels %s", label, levels)
             cond = merge_from_levels(model, swapped_zs(src["zs"], donor["zs"], levels))
             rows.append(module.render(x_t, cond, T=T).clamp(0, 1)); labels.append(label)
-        for label, levels in NULL_ROWS:
+        for label, levels in null_rows:
             logging.info("rendering %s using learned null token levels %s", label, levels)
-            cond = model.encode_with_nulls(x_src, levels)["cond"]
+            cond = model.merge(src["zs"], null_levels=levels)
             rows.append(module.render(x_t, cond, T=T).clamp(0, 1)); labels.append(label)
     output = Path(args.output); output.parent.mkdir(parents=True, exist_ok=True)
     save_labeled_grid([row.detach().cpu() for row in rows], labels, output)
-    meta = {"output": str(output), "row_labels": labels,
+    meta = {"output": str(output), "num_levels": num_levels, "row_labels": labels,
             "source_indices": batch["index"][:args.num_images].tolist(),
             "donor_indices": batch["index"][args.num_images:args.num_images * 2].tolist()}
     output.with_suffix(".json").write_text(json.dumps(meta, indent=2))

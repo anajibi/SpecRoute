@@ -66,4 +66,6 @@ Use `analyze_probe_results.py` to turn `probe_metrics.csv` into `probe_heatmap.p
 
 ## Swap/null diagnostic grid
 
-Use `swap_null_grid.py` to make one grid with source images, donor images, latent swaps for `Z1`, `Z2`, `Z3`, `Z1+Z2`, `Z2+Z3`, and learned-null-token rows for `Z1`, `Z2`, and `Z3`.
+Use `swap_null_grid.py` to make one grid with source images, donor images, latent swaps, and learned-null-token rows. The rows are generated from the configured number of levels `K`: every single-level swap (`Z1` ... `ZK`), every adjacent-pair swap (`Z1+Z2` ... `Z{K-1}+ZK`), and one null-token row per level.
+
+Use `abduct_xt_z_grid.py` to abduct `Z` and `x_T` once, then decode while progressively revealing semantic levels and replacing all unrevealed levels with their learned null tokens. It writes an all-null row, forward cumulative rows (`Z0`, `Z0+Z1`, ...), and reverse cumulative rows (`Z-1`, `Z-1+Z-2`, ...), so it works for 3, 5, 7, or any configured `K`.

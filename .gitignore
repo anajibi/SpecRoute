@@ -1,0 +1,40 @@
+# Ignore experiment outputs and large artifacts
+# Primary outputs folder used by experiments
+diffae_latent_probe/outputs/
+# Generic outputs/ at repo root (if used)
+outputs/
+
+# Data folders (large datasets, local copies)
+# Top-level data/ and any package-level data/ directories
+data/**/*
+**/data/**/*
+!data/**/*.py
+!data/*.py
+
+diffae_latent_probe/data/
+
+# Latent bundles, checkpoints and large weights
+diffae_latent_probe/latents/
+*.pt
+*.pth
+*.ckpt
+
+# Logs, caches and editor metadata
+logs/
+*.log
+__pycache__/
+*.pyc
+.vscode/
+.env
+
+# Ignore any generated image folders created by experiments
+**/images/
+**/imgs/
+
+
+
+# Ignore temporary files
+*.tmp
+*.swp
+
+.idea

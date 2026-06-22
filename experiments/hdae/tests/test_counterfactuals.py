@@ -20,12 +20,15 @@ def test_choose_probe_row_best_or_explicit_level(tmp_path):
 
 
 def test_summarize_attribute_changes_reports_target_and_preservation():
-    before = np.zeros((2, 4), dtype=float)
-    after = np.array([[0.0, 0.7, 0.1, 0.0], [0.0, 0.5, -0.2, 0.3]])
+    before = np.array([[0.2, 0.1, 0.6, 0.1], [0.2, 0.2, 0.4, 0.8]])
+    after = np.array([[0.2, 0.7, 0.4, 0.1], [0.2, 0.8, 0.7, 0.3]])
     summary = summarize_attribute_changes(before, after, target_index=1, severe_threshold=0.25)
     assert summary["target_delta_mean"] == pytest.approx(0.6)
-    assert summary["non_target_abs_delta_mean"] == pytest.approx((0 + .1 + 0 + 0 + .2 + .3) / 6)
-    assert summary["non_target_severe_fraction"] == pytest.approx(1 / 6)
+    assert summary["target_flip_rate"] == pytest.approx(1.0)
+    assert summary["non_target_abs_delta_mean"] == pytest.approx((0 + .2 + 0 + 0 + .3 + .5) / 6)
+    assert summary["non_target_severe_fraction"] == pytest.approx(2 / 6)
+    assert summary["non_target_flip_fraction"] == pytest.approx(3 / 6)
+    assert summary["non_target_any_flip_rate"] == pytest.approx(1.0)
 
 
 def test_torch_load_probe_checkpoint_requests_weights_only_false(monkeypatch, tmp_path):

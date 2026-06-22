@@ -55,6 +55,7 @@ def main():
     probe_analysis = out / "latent_probing" / "analysis"
     probe_analysis_summary = probe_analysis / "analysis_summary.json"
     swap_grid = out / "latent_probing" / "swap_null_grid.png"
+    abduct_grid = out / "latent_probing" / "abduct_xt_z_grid.png"
     cf_out = out / "counterfactuals" / args.attribute
     cf_summary = cf_out / "summary.json"
     ckpt = Path(args.ckpt) if args.ckpt else out / "checkpoints" / "last.ckpt"
@@ -76,6 +77,8 @@ def main():
         outputs=[probe_analysis_summary, probe_analysis / "probe_heatmap.png", probe_analysis / "best_level_counts.png"], force=args.force)
     run([py, "experiments/hdae/latent_probing/swap_null_grid.py", "--config", args.config, "--ckpt", str(ckpt), "--output", str(swap_grid)],
         outputs=[swap_grid, swap_grid.with_suffix(".json")], force=args.force)
+    run([py, "experiments/hdae/latent_probing/abduct_xt_z_grid.py", "--config", args.config, "--ckpt", str(ckpt), "--output", str(abduct_grid)],
+        outputs=[abduct_grid, abduct_grid.with_suffix(".json")], force=args.force)
     run([py, "experiments/hdae/counterfactuals/train_attr_classifier.py", "--config", args.config, "--output", str(attr_ckpt)],
         outputs=[attr_ckpt], force=args.force, skip=args.skip_attr_classifier and attr_ckpt.exists(), reason="requested and checkpoint exists")
     run([py, "experiments/hdae/counterfactuals/run_counterfactual_eval.py", "--config", args.config, "--ckpt", str(ckpt),

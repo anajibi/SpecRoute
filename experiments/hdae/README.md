@@ -65,13 +65,22 @@ The counterfactual stage uses the selected linear-probe direction (for example `
 
 ## Swap/null diagnostic grid and probe analysis plots
 
-Generate a grid with source/donor rows, swap rows for `Z1`, `Z2`, `Z3`, `Z1+Z2`, `Z2+Z3`, and null-token rows for each of `Z1`, `Z2`, and `Z3`:
+Generate a grid with source/donor rows, swap rows, and null-token rows. The script reads the configured number of levels `K` and renders every single-level swap (`Z1` ... `ZK`), every adjacent-pair swap (`Z1+Z2` ... `Z{K-1}+ZK`), and every single-level null-token ablation:
 
 ```bash
 python experiments/hdae/latent_probing/swap_null_grid.py \
   --config experiments/hdae/configs/celeba64_hier_k3.yaml \
   --ckpt <path> \
   --output experiments/hdae/outputs/celeba64_hier_k3/latent_probing/swap_null_grid.png
+```
+
+Generate an abductive `Z`/`x_T` reveal grid. This abducts the original semantic latents and DDIM stochastic code once, then decodes an all-null row, forward cumulative rows (`Z0`, `Z0+Z1`, ...), and reverse cumulative rows (`Z-1`, `Z-1+Z-2`, ...) with unrevealed levels replaced by learned null tokens:
+
+```bash
+python experiments/hdae/latent_probing/abduct_xt_z_grid.py \
+  --config experiments/hdae/configs/celeba64_hier_k3.yaml \
+  --ckpt <path> \
+  --output experiments/hdae/outputs/celeba64_hier_k3/latent_probing/abduct_xt_z_grid.png
 ```
 
 Analyze probe results with heatmaps and best-level summaries:
