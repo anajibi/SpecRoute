@@ -143,7 +143,9 @@ def train_all_probes(latents_npz: str, output_dir: str, *, lr: float = 1e-3,
         row.update({f"val_{k}": v for k, v in binary_metrics(val_logits, val_y).items()})
         row.update({f"test_{k}": v for k, v in binary_metrics(test_logits, test_y).items()})
         rows.append(row)
-        torch.save({"state_dict": model.state_dict(), "mean": mean, "std": std,
+        torch.save({"state_dict": model.state_dict(),
+                    "mean": torch.as_tensor(mean, dtype=torch.float32),
+                    "std": torch.as_tensor(std, dtype=torch.float32),
                     "job": job.__dict__, "row": row},
                    weights_dir / f"level{job.level:02d}_attr{job.attribute_index:02d}_{_safe_name(job.attribute_name)}.pt")
     with open(out / "probe_metrics.csv", "w", newline="") as f:
