@@ -59,6 +59,8 @@ def direction_from_probe_checkpoint(path: str):
     learned standardized weight by ``1 / std`` before normalization.
     """
     state = torch_load_probe_checkpoint(path)
+    if "weight" not in state["state_dict"]:
+        raise ValueError("latent edit directions require a linear probe checkpoint; MLP probes are for decodability only")
     weight = state["state_dict"]["weight"].detach().cpu().numpy().reshape(-1)
     std_value = state["std"]
     if hasattr(std_value, "detach"):
@@ -82,12 +84,18 @@ def summarize_attribute_changes(before: np.ndarray, after: np.ndarray, target_in
     delta = after - before
     non_target = [i for i in range(delta.shape[1]) if i != target_index]
     abs_non_target = np.abs(delta[:, non_target])
+    before_binary = before >= 0.5
+    after_binary = after >= 0.5
+    non_target_flips = before_binary[:, non_target] != after_binary[:, non_target]
     return {
         "target_delta_mean": float(delta[:, target_index].mean()),
         "target_delta_abs_mean": float(np.abs(delta[:, target_index]).mean()),
+        "target_flip_rate": float((before_binary[:, target_index] != after_binary[:, target_index]).mean()),
         "non_target_abs_delta_mean": float(abs_non_target.mean()),
         "non_target_abs_delta_max_mean": float(abs_non_target.max(axis=1).mean()),
         "non_target_severe_fraction": float((abs_non_target > severe_threshold).mean()),
+        "non_target_flip_fraction": float(non_target_flips.mean()),
+        "non_target_any_flip_rate": float(non_target_flips.any(axis=1).mean()),
         "num_images": int(delta.shape[0]),
         "num_non_target_attributes": int(len(non_target)),
     }
