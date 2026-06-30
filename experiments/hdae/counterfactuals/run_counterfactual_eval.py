@@ -26,18 +26,19 @@ def _probabilities(classifier, x):
         return torch.sigmoid(classifier(x)).detach().cpu().numpy()
 
 
-def _make_cf(module, x, row, direction, strength, direction_sign, T):
+def _render_recon_and_cf(module, x, row, direction, strength, direction_sign, T):
     model = module.ema_model
     encoded = model.encode(x)
+    x_t = module.encode_stochastic(x, encoded["cond"], T=T)
+    recon0 = module.render(x_t, encoded["cond"], T=T)
     zs = [z.clone() for z in encoded["zs"]]
     level = int(row["level"])
     d = torch.as_tensor(direction, dtype=zs[level].dtype, device=zs[level].device)[None, :]
     sign = 1.0 if direction_sign == "positive" else -1.0
     zs[level] = zs[level] + sign * float(strength) * d
     cond_cf = model.merge(zs)
-    x_t = module.encode_stochastic(x, encoded["cond"], T=T)
-    recon = module.render(x_t, cond_cf, T=T)
-    return recon, encoded
+    cf = module.render(x_t, cond_cf, T=T)
+    return recon0, cf, encoded
 
 
 def main():
@@ -79,17 +80,21 @@ def main():
     for batch in loader:
         if seen >= args.num_images: break
         x = batch["img"][:args.num_images - seen].to(device)
-        before = _probabilities(classifier, x)
+        real_probs = _probabilities(classifier, x)
         for direction_sign in directions:
-            cf, _encoded = _make_cf(module, x, row, direction, args.strength, direction_sign, T)
+            recon0, cf, _encoded = _render_recon_and_cf(module, x, row, direction, args.strength, direction_sign, T)
+            recon0_probs = _probabilities(classifier, recon0.mul(2).sub(1).clamp(-1, 1))
             after = _probabilities(classifier, cf.mul(2).sub(1).clamp(-1, 1))
-            delta = after - before
+            delta = after - recon0_probs
             for local_i, index in enumerate(batch["index"][:len(x)].tolist()):
                 rec = {"index": int(index), "direction": direction_sign,
-                       "target_before": float(before[local_i, target_index]),
+                       "target_real": float(real_probs[local_i, target_index]),
+                       "target_recon0": float(recon0_probs[local_i, target_index]),
                        "target_after": float(after[local_i, target_index]),
                        "target_delta": float(delta[local_i, target_index])}
                 for j, name in enumerate(attr_names):
+                    rec[f"recon0_{name}"] = float(recon0_probs[local_i, j])
+                    rec[f"after_{name}"] = float(after[local_i, j])
                     rec[f"delta_{name}"] = float(delta[local_i, j])
                 all_rows.append(rec)
             if first_grid is None:
@@ -104,13 +109,13 @@ def main():
     summaries = {}
     for direction_sign in directions:
         rows = [r for r in all_rows if r["direction"] == direction_sign]
-        before = np.asarray([[r["target_before"] if j == target_index else 0 for j in range(len(attr_names))] for r in rows])
-        # Reconstruct before/after matrices from delta columns for summary target/non-target deltas.
-        delta = np.asarray([[r[f"delta_{name}"] for name in attr_names] for r in rows])
-        summaries[direction_sign] = summarize_attribute_changes(np.zeros_like(delta), delta, target_index)
+        # Deltas are relative to the strength-0 self-reconstruction to avoid reconstruction-drift confounds.
+        recon0 = np.asarray([[r[f"recon0_{name}"] for name in attr_names] for r in rows])
+        after = np.asarray([[r[f"after_{name}"] for name in attr_names] for r in rows])
+        summaries[direction_sign] = summarize_attribute_changes(recon0, after, target_index)
     summary = {"attribute": args.attribute, "target_index": target_index, "level": int(row["level"]),
                "strength": args.strength, "probe_weight_path": str(weight_path), "csv": str(csv_path),
-               "summaries": summaries}
+               "baseline": "self_reconstruction", "summaries": summaries}
     (out / "summary.json").write_text(json.dumps(summary, indent=2))
     if first_grid is not None:
         orig_row, cf_row, direction_label = first_grid

@@ -71,15 +71,31 @@ def binary_metrics(logits: np.ndarray, targets01: np.ndarray) -> Dict[str, float
             "positive_accuracy": pos_acc, "negative_accuracy": neg_acc}
 
 
+def build_probe(input_dim: int, probe_type: str = "linear", hidden_dim: int = 256,
+                dropout: float = 0.0):
+    """Build a binary probe head for one latent level/attribute."""
+    import torch
+    if probe_type == "linear":
+        return torch.nn.Linear(input_dim, 1)
+    if probe_type == "mlp":
+        layers = [torch.nn.Linear(input_dim, hidden_dim), torch.nn.ReLU()]
+        if dropout > 0:
+            layers.append(torch.nn.Dropout(dropout))
+        layers.append(torch.nn.Linear(hidden_dim, 1))
+        return torch.nn.Sequential(*layers)
+    raise ValueError(f"unknown probe_type {probe_type!r}; expected 'linear' or 'mlp'")
+
+
 def _train_one_torch(train_x, train_y, val_x, val_y, lr, weight_decay, max_epochs,
-                     batch_size, patience, device, seed):
+                     batch_size, patience, device, seed, probe_type="linear",
+                     hidden_dim=256, dropout=0.0):
     import torch
     torch.manual_seed(seed)
     x = torch.as_tensor(train_x, dtype=torch.float32, device=device)
     y = torch.as_tensor(train_y[:, None], dtype=torch.float32, device=device)
     vx = torch.as_tensor(val_x, dtype=torch.float32, device=device)
     vy = torch.as_tensor(val_y[:, None], dtype=torch.float32, device=device)
-    model = torch.nn.Linear(train_x.shape[1], 1).to(device)
+    model = build_probe(train_x.shape[1], probe_type=probe_type, hidden_dim=hidden_dim, dropout=dropout).to(device)
     opt = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
     loss_fn = torch.nn.BCEWithLogitsLoss()
     best_state, best_loss, bad = None, float("inf"), 0
@@ -109,8 +125,9 @@ def _safe_name(name: str) -> str:
 def train_all_probes(latents_npz: str, output_dir: str, *, lr: float = 1e-3,
                      weight_decay: float = 1e-4, max_epochs: int = 200,
                      batch_size: int = 256, patience: int = 20,
-                     device: str = "cpu", seed: int = 0) -> List[Dict[str, float]]:
-    """Train and save every independent level/attribute linear classifier."""
+                     device: str = "cpu", seed: int = 0, probe_type: str = "linear",
+                     hidden_dim: int = 256, dropout: float = 0.0) -> List[Dict[str, float]]:
+    """Train and save every independent level/attribute probe classifier."""
     import torch
     if device == "auto":
         device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -132,26 +149,30 @@ def train_all_probes(latents_npz: str, output_dir: str, *, lr: float = 1e-3,
         train_y, val_y, test_y = y_all[train_idx], y_all[val_idx], y_all[test_idx]
         model, best_val_loss = _train_one_torch(train_x, train_y, val_x, val_y, lr,
                                                 weight_decay, max_epochs, batch_size,
-                                                patience, device, seed + job.level * 1000 + job.attribute_index)
+                                                patience, device, seed + job.level * 1000 + job.attribute_index,
+                                                probe_type=probe_type, hidden_dim=hidden_dim, dropout=dropout)
         with torch.no_grad():
             val_logits = model(torch.as_tensor(val_x, dtype=torch.float32)).squeeze(1).numpy()
             test_logits = model(torch.as_tensor(test_x, dtype=torch.float32)).squeeze(1).numpy()
         row = {"level": job.level, "latent_key": job.latent_key,
                "attribute_index": job.attribute_index, "attribute_name": job.attribute_name,
                "num_train": len(train_idx), "num_val": len(val_idx), "num_test": len(test_idx),
-               "best_val_loss": best_val_loss}
+               "best_val_loss": best_val_loss, "probe_type": probe_type,
+               "hidden_dim": int(hidden_dim), "dropout": float(dropout)}
         row.update({f"val_{k}": v for k, v in binary_metrics(val_logits, val_y).items()})
         row.update({f"test_{k}": v for k, v in binary_metrics(test_logits, test_y).items()})
         rows.append(row)
         torch.save({"state_dict": model.state_dict(),
                     "mean": torch.as_tensor(mean, dtype=torch.float32),
                     "std": torch.as_tensor(std, dtype=torch.float32),
-                    "job": job.__dict__, "row": row},
+                    "job": job.__dict__, "row": row,
+                    "probe_type": probe_type, "hidden_dim": int(hidden_dim), "dropout": float(dropout)},
                    weights_dir / f"level{job.level:02d}_attr{job.attribute_index:02d}_{_safe_name(job.attribute_name)}.pt")
     with open(out / "probe_metrics.csv", "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
         writer.writeheader(); writer.writerows(rows)
     summary = {"num_levels": len(keys), "num_attributes": len(attribute_names),
-               "num_classifiers": len(rows), "metrics_csv": str(out / "probe_metrics.csv")}
+               "num_classifiers": len(rows), "metrics_csv": str(out / "probe_metrics.csv"),
+               "probe_type": probe_type, "hidden_dim": int(hidden_dim), "dropout": float(dropout)}
     (out / "summary.json").write_text(json.dumps(summary, indent=2))
     return rows

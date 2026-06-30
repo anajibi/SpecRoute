@@ -32,3 +32,15 @@ def test_split_indices_uses_partitions_or_fallback():
     assert test.tolist() == [2, 5]
     train, val, test = split_indices(np.zeros(20, dtype=int))
     assert len(train) == 16 and len(val) == 2 and len(test) == 2
+
+
+def test_build_probe_supports_linear_and_mlp():
+    import pytest
+    torch = pytest.importorskip("torch")
+    from experiments.hdae.latent_probing.linear_probe import build_probe
+
+    linear = build_probe(4, probe_type="linear")
+    mlp = build_probe(4, probe_type="mlp", hidden_dim=8, dropout=0.1)
+    assert isinstance(linear, torch.nn.Linear)
+    assert isinstance(mlp, torch.nn.Sequential)
+    assert mlp(torch.zeros(2, 4)).shape == (2, 1)
