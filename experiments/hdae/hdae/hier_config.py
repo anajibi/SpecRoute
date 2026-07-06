@@ -1,6 +1,6 @@
 """Typed configuration owned by the HDAE experiment."""
 from dataclasses import dataclass, field
-from typing import List, Tuple, Union
+from typing import List, Union
 
 from model.unet_autoenc import BeatGANsAutoencConfig
 
@@ -32,6 +32,7 @@ class EncoderHierarchyConfig:
     hier_block_to_level: List[int] = field(default_factory=_default_block_to_level)
     n_decoder_output_blocks: int = 11
     n_attributes: int = 5
+    conditioning_attrs: List[str] = field(default_factory=lambda: ["Smiling", "Eyeglasses", "Male", "Young", "Wearing_Lipstick"])
     attr_embed_dim: int = 128
     attr_dropout_prob: float = 0.1
     hier_proj: str = "linear"
@@ -59,6 +60,8 @@ class EncoderHierarchyConfig:
             raise ValueError("max(hier_block_to_level) must be len(hier_level_dims)-1")
         if min(self.hier_block_to_level, default=0) < 0:
             raise ValueError("hier_block_to_level entries must be non-negative")
+        if self.conditioning_attrs and len(self.conditioning_attrs) != int(self.n_attributes):
+            raise ValueError("len(conditioning_attrs) must equal n_attributes")
         if self.attr_input_range not in {"auto", "pm1", "01"}:
             raise ValueError("attr_input_range must be one of {'auto','pm1','01'}")
         if not 0 <= self.attr_dropout_prob < 1:

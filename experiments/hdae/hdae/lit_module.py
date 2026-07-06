@@ -14,11 +14,24 @@ class HDAELitModule(LitModel):
         """Datasets are supplied by the external packed-data DataModule."""
         return None
 
+    def _conditioning_attr_indices(self):
+        e = self.model.hdae_conf.encoder
+        if not e.conditioning_attrs:
+            return list(range(e.n_attributes))
+        names = getattr(getattr(self, "trainer", None), "datamodule", None)
+        names = getattr(names, "attribute_names", None)
+        if names is None:
+            return list(range(e.n_attributes))
+        missing = [name for name in e.conditioning_attrs if name not in names]
+        if missing:
+            raise ValueError(f"conditioning_attrs not found in datamodule attributes: {missing}")
+        return [names.index(name) for name in e.conditioning_attrs]
+
     def _batch_y_idx(self, batch):
         e = self.model.hdae_conf.encoder
         if "attr" not in batch:
             return None
-        raw = batch["attr"][:, :e.n_attributes]
+        raw = batch["attr"][:, self._conditioning_attr_indices()]
         if not hasattr(self, "_logged_attr_values"):
             self._logged_attr_values = True
             print(f"HDAE raw attribute unique values sample: {observed_unique(raw)}")

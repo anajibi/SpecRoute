@@ -15,6 +15,7 @@ encoder:
   hier_block_to_level: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
   n_decoder_output_blocks: 11
   n_attributes: 5
+  conditioning_attrs: [Smiling, Eyeglasses, Male, Young, Wearing_Lipstick]
   attr_embed_dim: 128
   attr_dropout_prob: 0.1
   hier_proj: linear
