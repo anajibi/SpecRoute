@@ -10,8 +10,8 @@ data:
   resize_filter: bicubic
 encoder:
   type: hierarchical
-  tap_resolutions: [4, 8, 16, 32, 64]
-  level_dims: [103, 103, 102, 102, 102]
+  tap_resolutions: [ 4, 8, 16 ]
+  level_dims: [ 64, 192, 256 ]
   pool: adaptive_avg
   proj: linear
 conditioning:
@@ -19,8 +19,8 @@ conditioning:
   style_ch: 512
   latent_drop_prob: 0.12
 train:
-  batch_size_per_gpu: 64
-  total_batch_size: 128
+  batch_size_per_gpu: 32
+  total_batch_size: 64
   lr: 1.0e-4
   ema_decay: 0.9999
   T: 1000
@@ -35,6 +35,6 @@ lightning:
   devices: 2
   strategy: cuda
   log_every_n_steps: 50
-  val_check_interval: 50
+  val_check_interval: 300
 seed: 42
-output_dir: experiments/hdae/outputs/celeba64_hier_k5_equal
+output_dir: experiments/hdae/outputs/celeba64_hier_k3_reverse

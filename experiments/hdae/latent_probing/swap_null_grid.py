@@ -10,13 +10,6 @@ import argparse, json, logging, sys
 from pathlib import Path
 ROOT = Path(__file__).resolve().parents[3]; sys.path.insert(0, str(ROOT))
 
-import torch
-from torch.utils.data import DataLoader
-from experiments.hdae.hdae.grid_utils import save_labeled_grid
-
-from experiments.hdae.data.celeba_hq import CelebAHQPacked
-from experiments.hdae.hdae.config_io import load_hdae_config
-from experiments.hdae.hdae.lit_module import HDAELitModule
 
 logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(message)s")
 
@@ -53,6 +46,13 @@ def swapped_zs(source_zs, donor_zs, levels):
 
 
 def main():
+    import torch
+    from torch.utils.data import DataLoader
+    from experiments.hdae.hdae.grid_utils import save_labeled_grid
+    from experiments.hdae.data.celeba_hq import CelebAHQPacked
+    from experiments.hdae.hdae.config_io import load_hdae_config
+    from experiments.hdae.hdae.lit_module import HDAELitModule
+
     p = argparse.ArgumentParser()
     p.add_argument("--config", required=True)
     p.add_argument("--ckpt", required=True)

@@ -4,8 +4,8 @@ data:
   attr_path: "/home/anajibi/HDM/diffae_latent_probe/data/celeba-hq/list_attr_celeba.txt"
   partition_path: "/home/anajibi/HDM/diffae_latent_probe/data/celeba-hq/list_eval_partition.txt"
   image_size: 64
-  lmdb_path: "experiments/hdae/data/packed/celebahq_64.lmdb"
-  attr_npz: "experiments/hdae/data/packed/celebahq_64_attrs.npz"
+  lmdb_path: "/home/anajibi/HDM/experiments/hdae/data/packed/celebahq_64.lmdb"
+  attr_npz: "/home/anajibi/HDM/experiments/hdae/data/packed/celebahq_64_attrs.npz"
   flip_aug: true
   resize_filter: bicubic
 encoder:

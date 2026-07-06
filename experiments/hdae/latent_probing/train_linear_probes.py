@@ -25,6 +25,7 @@ def main():
     p.add_argument("--hidden-dim", type=int, default=256)
     p.add_argument("--dropout", type=float, default=0.0)
     args = p.parse_args()
+    print(f"training {args.probe_type} probes on {args.latents}...")
     rows = train_all_probes(args.latents, args.output_dir, lr=args.lr,
                             weight_decay=args.weight_decay, max_epochs=args.max_epochs,
                             batch_size=args.batch_size, patience=args.patience,
