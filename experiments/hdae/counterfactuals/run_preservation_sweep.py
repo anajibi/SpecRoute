@@ -1,31 +1,26 @@
 #!/usr/bin/env python
-"""Sweep latent-edit level and strength while measuring preservation drift."""
+"""Toggle attribute conditioning while measuring fixed-latent preservation drift."""
 import argparse, csv, json, logging, sys
 from pathlib import Path
 ROOT = Path(__file__).resolve().parents[3]; sys.path.insert(0, str(ROOT))
 
 import numpy as np
 
-from experiments.hdae.counterfactuals.directions import (
-    choose_probe_row, direction_from_probe_checkpoint, probe_weight_path,
-    summarize_attribute_changes,
-)
+from experiments.hdae.counterfactuals.directions import summarize_attribute_changes
+
 logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(message)s")
 DEFAULT_ATTRIBUTES = ["Smiling", "Eyeglasses", "Male", "Young"]
-DEFAULT_STRENGTHS = [0.0, 0.5, 1.0, 2.0, 4.0]
 
 
 def parse_csv_list(value):
     return [item.strip() for item in value.split(",") if item.strip()]
 
 
-def parse_strengths(value):
-    strengths = [float(item.strip()) for item in value.split(",") if item.strip()]
-    if 0.0 not in strengths:
-        logging.warning("strength list did not include 0; injecting strength-0 drift-control column")
-        strengths = [0.0, *strengths]
-    return strengths
 
+def parse_strengths(value):
+    """Backward-compatible parser; conditioning-only CF ignores strengths."""
+    strengths = [float(item.strip()) for item in value.split(",") if item.strip()]
+    return strengths if 0.0 in strengths else [0.0, *strengths]
 
 def safe_name(name):
     return "".join(ch if ch.isalnum() or ch in "._-" else "_" for ch in name)
@@ -49,77 +44,54 @@ def intended_target_flip_rate(before, after, target_index, direction_sign):
     return float((before_pos & ~after_pos).mean())
 
 
-def plot_preservation_heatmap(path, levels, strengths, matrix, title=None):
-    """Plot a level × strength preservation heatmap."""
-    import matplotlib.pyplot as plt
-    fig, ax = plt.subplots(figsize=(max(5, len(strengths) * 0.9), max(3, len(levels) * 0.55)))
-    im = ax.imshow(matrix, aspect="auto", cmap="magma")
-    ax.set_xticks(np.arange(len(strengths)))
-    ax.set_xticklabels([f"{s:g}" for s in strengths])
-    ax.set_yticks(np.arange(len(levels)))
-    ax.set_yticklabels([f"Z{level + 1}" for level in levels])
-    ax.set_xlabel("CF strength")
-    ax.set_ylabel("Edited latent level")
-    ax.set_title(title or "Non-target absolute delta")
-    fig.colorbar(im, ax=ax, label="mean |Δ non-target| base=recon0")
-    fig.tight_layout(); fig.savefig(path, dpi=200); plt.close(fig)
+def conditioning_attr_indices(model, dataset_attr_names):
+    e = model.hdae_conf.encoder
+    attrs = list(e.conditioning_attrs) if e.conditioning_attrs else list(dataset_attr_names[:e.n_attributes])
+    missing = [a for a in attrs if a not in dataset_attr_names]
+    if missing:
+        raise ValueError(f"conditioning_attrs not found in dataset attributes: {missing}")
+    return attrs, [dataset_attr_names.index(a) for a in attrs]
 
 
-def _write_matrix_csv(path, levels, strengths, values_by_cell):
+def preservation_indices(attr_names, conditioning_attrs):
+    cond = set(conditioning_attrs)
+    return [i for i, name in enumerate(attr_names) if name not in cond]
+
+
+def _write_single_row_csv(path, row):
     with open(path, "w", newline="") as f:
-        writer = csv.writer(f)
-        writer.writerow(["level", *[f"strength_{s:g}" for s in strengths]])
-        for level in levels:
-            writer.writerow([level, *[values_by_cell.get((level, float(s)), float("nan")) for s in strengths]])
-
-
-def _load_level_directions(attributes, num_levels, probe_metrics, probe_weights_dir):
-    directions = {}
-    for attr in attributes:
-        for level in range(num_levels):
-            try:
-                row = choose_probe_row(probe_metrics, attr, level=level)
-                weight_path = probe_weight_path(probe_weights_dir, row)
-                direction, _state = direction_from_probe_checkpoint(weight_path)
-                directions[(attr, level)] = (row, direction)
-            except Exception as exc:
-                logging.warning("skipping attribute=%s level=%d: %s", attr, level, exc)
-    return directions
+        writer = csv.DictWriter(f, fieldnames=list(row.keys()))
+        writer.writeheader(); writer.writerow(row)
 
 
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--config", required=True)
     p.add_argument("--ckpt", required=True)
-    p.add_argument("--probe-metrics", required=True)
-    p.add_argument("--probe-weights-dir", required=True)
+    # Kept as ignored optional args so older wrappers fail less abruptly.
+    p.add_argument("--probe-metrics", default=None, help="Ignored: CF generation changes conditioning, not latent directions.")
+    p.add_argument("--probe-weights-dir", default=None, help="Ignored: CF generation changes conditioning, not latent directions.")
     p.add_argument("--attr-classifier", required=True)
     p.add_argument("--attributes", default=",".join(DEFAULT_ATTRIBUTES),
-                   help="Comma-separated target attributes; Young is the age attribute.")
-    p.add_argument("--strengths", default=",".join(f"{s:g}" for s in DEFAULT_STRENGTHS),
-                   help="Comma-separated strengths; 0 is required and injected if omitted.")
+                   help="Comma-separated conditioned target attributes to toggle; Young is the age attribute.")
     p.add_argument("--direction", choices=["positive", "negative", "both"], default="both")
     p.add_argument("--num-images", type=int, default=64)
     p.add_argument("--batch-size", type=int, default=16)
     p.add_argument("--T", type=int, default=None)
     p.add_argument("--output-dir", required=True)
-    p.add_argument("--normalize-strength", dest="normalize_strength", action=argparse.BooleanOptionalAction, default=True,
-                   help="Scale strengths by the mean latent norm for the edited level (default: enabled).")
     p.add_argument("--save-grids", action="store_true")
-    p.add_argument("--per-attribute-matrix", action="store_true",
-                   help="Save preservation heatmaps per attribute/direction.")
     args = p.parse_args()
 
     import torch
     from torch.utils.data import DataLoader
     from experiments.hdae.counterfactuals.attribute_classifier import load_classifier
     from experiments.hdae.data.celeba_hq import CelebAHQPacked
+    from experiments.hdae.hdae.attr_utils import to_index_space
     from experiments.hdae.hdae.config_io import load_hdae_config
     from experiments.hdae.hdae.grid_utils import save_labeled_grid
     from experiments.hdae.hdae.lit_module import HDAELitModule
 
     attributes = parse_csv_list(args.attributes)
-    strengths = parse_strengths(args.strengths)
     out = Path(args.output_dir); out.mkdir(parents=True, exist_ok=True)
     cfg = load_hdae_config(args.config)
     data = cfg.raw["data"]
@@ -129,19 +101,20 @@ def main():
     classifier, clf_state = load_classifier(args.attr_classifier, device=device)
     attr_names = [str(x) for x in clf_state["attribute_names"]]
     attr_to_idx = {name: i for i, name in enumerate(attr_names)}
+    ds = CelebAHQPacked(data["lmdb_path"], data["attr_npz"], flip=False)
+    cond_attrs, cond_indices = conditioning_attr_indices(model, ds.attribute_names)
     missing_attrs = [attr for attr in attributes if attr not in attr_to_idx]
     if missing_attrs:
         raise ValueError(f"attributes not found in classifier: {missing_attrs}")
-    num_levels = len(model.hdae_conf.encoder.level_dims)
-    levels = list(range(num_levels))
+    not_conditioned = [attr for attr in attributes if attr not in cond_attrs]
+    if not_conditioned:
+        raise ValueError(f"conditioning-only CF can only toggle encoder.conditioning_attrs; not conditioned: {not_conditioned}")
+    preserve_idx = preservation_indices(attr_names, cond_attrs)
     directions = ["positive", "negative"] if args.direction == "both" else [args.direction]
     T = args.T or cfg.raw["train"]["T_eval"]
-    level_dirs = _load_level_directions(attributes, num_levels, args.probe_metrics, args.probe_weights_dir)
 
-    accum = {(attr, level, float(strength), direction): {"base": [], "edit": []}
-             for attr in attributes for level in levels for strength in strengths for direction in directions
-             if (attr, level) in level_dirs}
-    ds = CelebAHQPacked(data["lmdb_path"], data["attr_npz"], flip=False)
+    accum = {(attr, direction): {"base": [], "edit": []}
+             for attr in attributes for direction in directions}
     loader = DataLoader(ds, batch_size=args.batch_size, shuffle=False, num_workers=0)
     first_grid = {}
     seen = 0
@@ -149,90 +122,68 @@ def main():
         if seen >= args.num_images:
             break
         x = batch["img"][:args.num_images - seen].to(device)
+        y_raw = batch["attr"][:len(x), cond_indices].to(device)
+        y_idx = to_index_space(y_raw, model.hdae_conf.encoder.attr_input_range).to(device)
         with torch.no_grad():
             encoded = model.encode(x)
             zs = [z.clone() for z in encoded["zs"]]
-            x_t = module.encode_stochastic(x, encoded["cond"], T=T)
-            recon0 = module.render(x_t, model.merge([z.clone() for z in zs]), T=T)
+            source_cond = {"zs": zs, "y_idx": y_idx}
+            x_t = module.encode_stochastic(x, source_cond, T=T)
+            recon0 = module.render(x_t, source_cond, T=T)
             base_probs = classifier_probs(classifier, rendered_to_classifier_input(recon0))
-            level_scales = [float(z.norm(dim=1, keepdim=True).mean().detach().cpu()) for z in zs]
             for attr in attributes:
-                for level in levels:
-                    if (attr, level) not in level_dirs:
-                        continue
-                    _row, direction_vec = level_dirs[(attr, level)]
-                    d = torch.as_tensor(direction_vec, dtype=zs[level].dtype, device=zs[level].device)[None, :]
-                    for direction_sign in directions:
-                        sign = 1.0 if direction_sign == "positive" else -1.0
-                        for strength in strengths:
-                            s_eff = float(strength) * (level_scales[level] if args.normalize_strength else 1.0)
-                            zs_edit = [z.clone() for z in zs]
-                            zs_edit[level] = zs_edit[level] + sign * s_eff * d
-                            cf = module.render(x_t, model.merge(zs_edit), T=T)
-                            edit_probs = classifier_probs(classifier, rendered_to_classifier_input(cf))
-                            key = (attr, level, float(strength), direction_sign)
-                            accum[key]["base"].append(base_probs)
-                            accum[key]["edit"].append(edit_probs)
-                            if args.save_grids and strength == max(strengths) and (attr, direction_sign) not in first_grid:
-                                first_grid[(attr, direction_sign)] = (
-                                    x.add(1).div(2).detach().cpu(), recon0.clamp(0, 1).detach().cpu(),
-                                    cf.clamp(0, 1).detach().cpu(), level, strength)
+                target_cond_col = cond_attrs.index(attr)
+                for direction_sign in directions:
+                    y_cf = y_idx.clone()
+                    y_cf[:, target_cond_col] = 1 if direction_sign == "positive" else 0
+                    cf = module.render(x_t, {"zs": zs, "y_idx": y_cf}, T=T)
+                    edit_probs = classifier_probs(classifier, rendered_to_classifier_input(cf))
+                    key = (attr, direction_sign)
+                    accum[key]["base"].append(base_probs)
+                    accum[key]["edit"].append(edit_probs)
+                    if args.save_grids and key not in first_grid:
+                        first_grid[key] = (x.add(1).div(2).detach().cpu(), recon0.clamp(0, 1).detach().cpu(), cf.clamp(0, 1).detach().cpu())
         seen += len(x)
         logging.info("processed %d/%d images", min(seen, args.num_images), args.num_images)
 
     long_rows = []
-    for key, value in sorted(accum.items(), key=lambda kv: (kv[0][0], kv[0][3], kv[0][1], kv[0][2])):
-        attr, level, strength, direction_sign = key
+    for (attr, direction_sign), value in sorted(accum.items()):
         if not value["base"]:
             continue
         base = np.concatenate(value["base"], axis=0)
         edit = np.concatenate(value["edit"], axis=0)
         target_idx = attr_to_idx[attr]
-        summary = summarize_attribute_changes(base, edit, target_idx)
+        summary = summarize_attribute_changes(base, edit, target_idx, preservation_indices=preserve_idx)
         summary["target_intended_flip_rate"] = intended_target_flip_rate(base, edit, target_idx, direction_sign)
-        row = {"attribute": attr, "level": int(level), "level_dim": int(model.hdae_conf.encoder.level_dims[level]),
-               "strength": float(strength), "direction": direction_sign, **summary}
+        row = {"attribute": attr, "direction": direction_sign,
+               "edit_mechanism": "conditioning_signal_only_fixed_latents",
+               "num_conditioning_attributes": len(cond_attrs),
+               "num_preservation_attributes": len(preserve_idx), **summary}
         long_rows.append(row)
 
     long_path = out / "preservation_sweep.csv"
     with open(long_path, "w", newline="") as f:
-        fieldnames = list(long_rows[0].keys()) if long_rows else ["attribute", "level", "strength", "direction"]
+        fieldnames = list(long_rows[0].keys()) if long_rows else ["attribute", "direction"]
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader(); writer.writerows(long_rows)
 
-    for attr in attributes:
-        for direction_sign in directions:
-            suffix = "" if args.direction != "both" else ("_pos" if direction_sign == "positive" else "_neg")
-            rows = [r for r in long_rows if r["attribute"] == attr and r["direction"] == direction_sign]
-            by = {(int(r["level"]), float(r["strength"])): r for r in rows}
-            attr_safe = safe_name(attr)
-            _write_matrix_csv(out / f"{attr_safe}{suffix}_target_delta.csv", levels, strengths,
-                              {(level, s): by[(level, s)]["target_delta_mean"] for level, s in by})
-            _write_matrix_csv(out / f"{attr_safe}{suffix}_nontarget_abs_delta.csv", levels, strengths,
-                              {(level, s): by[(level, s)]["non_target_abs_delta_mean"] for level, s in by})
-            _write_matrix_csv(out / f"{attr_safe}{suffix}_nontarget_flip_frac.csv", levels, strengths,
-                              {(level, s): by[(level, s)]["non_target_flip_fraction"] for level, s in by})
-            if args.per_attribute_matrix:
-                matrix = np.full((len(levels), len(strengths)), np.nan, dtype=float)
-                for i, level in enumerate(levels):
-                    for j, strength in enumerate(strengths):
-                        if (level, float(strength)) in by:
-                            matrix[i, j] = by[(level, float(strength))]["non_target_abs_delta_mean"]
-                plot_preservation_heatmap(out / f"{attr_safe}{suffix}_preservation_heatmap.png", levels, strengths, matrix,
-                                          title=f"{attr} {direction_sign} preservation")
+    for row in long_rows:
+        suffix = "_pos" if row["direction"] == "positive" else "_neg"
+        _write_single_row_csv(out / f"{safe_name(row['attribute'])}{suffix}_conditioning_preservation.csv", row)
 
     if args.save_grids:
-        for (attr, direction_sign), (orig, recon0, edit, level, strength) in first_grid.items():
-            save_labeled_grid([orig, recon0, edit], ["original", "recon0", f"edit_Z{level + 1}_s{strength:g}"],
+        for (attr, direction_sign), (orig, recon0, edit) in first_grid.items():
+            save_labeled_grid([orig, recon0, edit], ["original", "recon0", f"condition_{attr}_{direction_sign}"],
                               out / f"{safe_name(attr)}_{direction_sign}_grid.png")
 
     summary = {"config": args.config, "ckpt": args.ckpt, "attributes": attributes,
-               "attribute_notes": {"Young": "age attribute"}, "strengths": strengths,
-               "directions": directions, "normalize_strength": bool(args.normalize_strength),
-               "level_dims": {str(i): int(dim) for i, dim in enumerate(model.hdae_conf.encoder.level_dims)},
+               "attribute_notes": {"Young": "age attribute"}, "directions": directions,
+               "edit_mechanism": "conditioning_signal_only_fixed_latents",
+               "conditioning_attrs": cond_attrs,
+               "preservation_attrs": [attr_names[i] for i in preserve_idx],
                "num_images": int(seen), "csv": str(long_path)}
     (out / "summary.json").write_text(json.dumps(summary, indent=2))
-    logging.info("wrote preservation sweep to %s", long_path)
+    logging.info("wrote conditioning preservation eval to %s", long_path)
 
 
 if __name__ == "__main__":

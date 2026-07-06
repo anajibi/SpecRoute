@@ -102,6 +102,10 @@ class HierarchicalAutoencModel(BeatGANsAutoencModel):
 
     def forward(self, x, t, y=None, x_start=None, cond=None, style=None, noise=None,
                 t_cond=None, y_idx=None, zs=None, **kwargs):
+        if isinstance(cond, dict):
+            zs = cond.get("zs", zs)
+            y_idx = cond.get("y_idx", y_idx)
+            cond = cond.get("cond", None)
         if t_cond is None:
             t_cond = t
         if noise is not None:
