@@ -47,6 +47,53 @@ def _encoder_conf(conf):
                                  use_new_attention_order=m.use_new_attention_order, pool=m.enc_pool)
 
 
+def _num_decoder_output_blocks(conf):
+    m = conf.model_conf
+    return sum(int(m.num_res_blocks) + 1 for _ in m.channel_mult)
+
+
+def _legacy_resolution_to_block_taps(enc_conf, tap_resolutions):
+    """Map legacy coarse->fine resolutions to representative input block taps."""
+    valid = stage_channels(enc_conf)
+    bad = set(tap_resolutions) - set(valid)
+    if bad:
+        raise ValueError(f"invalid taps {sorted(bad)}; valid: {sorted(valid)}")
+    block_for_res = {}
+    import torch
+    from model.unet import BeatGANsEncoderModel
+    enc = BeatGANsEncoderModel(enc_conf)
+    with torch.no_grad():
+        h = torch.zeros(1, enc_conf.in_channels, enc_conf.image_size, enc_conf.image_size)
+        for i, module in enumerate(enc.input_blocks):
+            h = module(h, emb=None)
+            block_for_res[h.shape[-1]] = i
+    block_for_res[min(valid)] = "mid"
+    return [block_for_res[int(r)] for r in tap_resolutions]
+
+
+def _contiguous_block_to_level(num_blocks, k):
+    return [min(k - 1, i * k // num_blocks) for i in range(num_blocks)]
+
+
+def _build_encoder_config(raw_encoder, conf):
+    data = dict(raw_encoder)
+    num_blocks = _num_decoder_output_blocks(conf)
+    level_dims = data.get("hier_level_dims", data.get("level_dims", [512]))
+    k = len(level_dims)
+    data.setdefault("n_decoder_output_blocks", num_blocks)
+    data.setdefault("hier_level_dims", list(level_dims))
+    data.setdefault("level_dims", list(level_dims))
+    if "hier_block_to_level" not in data:
+        data["hier_block_to_level"] = _contiguous_block_to_level(num_blocks, k)
+    if "hier_tap_block_ids" not in data:
+        if "tap_resolutions" in data:
+            data["hier_tap_block_ids"] = _legacy_resolution_to_block_taps(_encoder_conf(conf), data["tap_resolutions"])
+        else:
+            data["hier_tap_block_ids"] = ["mid"] if k == 1 else list(range(k))
+    data.setdefault("hier_proj", data.get("proj", "linear"))
+    return EncoderHierarchyConfig(**data)
+
+
 def load_hdae_config(path, require_data=True):
     with open(path) as f:
         raw = yaml.safe_load(f)
@@ -64,18 +111,15 @@ def load_hdae_config(path, require_data=True):
     conf.T_eval = t["T_eval"];
     conf.grad_clip = t["grad_clip"];
     conf.img_size = raw["data"]["image_size"]
-    e = EncoderHierarchyConfig(**raw["encoder"]);
-    c = ConditioningConfig(**raw["conditioning"])
+    conf.make_model_conf()
+    e = _build_encoder_config(raw["encoder"], conf)
+    c = ConditioningConfig(**raw.get("conditioning", {}))
     if e.type not in {"flat", "hierarchical"}: raise ValueError("encoder.type must be flat or hierarchical")
-    if c.strategy == "concat_proj" and sum(e.level_dims) != c.style_ch: raise ValueError("sum(level_dims) must equal style_ch")
     if not 0 <= c.latent_drop_prob < 1: raise ValueError("conditioning.latent_drop_prob must be in [0, 1)")
     conf.style_ch = c.style_ch;
     hdae = HDAEConfig(e, c);
     conf.hdae_conf = hdae;
     conf.make_model_conf()
-    valid = stage_channels(_encoder_conf(conf))
-    bad = set(e.tap_resolutions) - set(valid)
-    if bad: raise ValueError(f"invalid taps {sorted(bad)}; valid: {sorted(valid)}")
     if require_data and not Path(raw["data"]["lmdb_path"]).exists():
         raise FileNotFoundError(
             f"Packed data missing. Run: python experiments/hdae/scripts/preprocess_data.py --config {path}")

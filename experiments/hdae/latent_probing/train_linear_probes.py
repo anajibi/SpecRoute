@@ -21,12 +21,16 @@ def main():
     p.add_argument("--patience", type=int, default=20)
     p.add_argument("--device", default="auto", help="auto, cuda, or cpu")
     p.add_argument("--seed", type=int, default=0)
+    p.add_argument("--probe-type", choices=["linear", "mlp"], default="linear")
+    p.add_argument("--hidden-dim", type=int, default=256)
+    p.add_argument("--dropout", type=float, default=0.0)
     args = p.parse_args()
     rows = train_all_probes(args.latents, args.output_dir, lr=args.lr,
                             weight_decay=args.weight_decay, max_epochs=args.max_epochs,
                             batch_size=args.batch_size, patience=args.patience,
-                            device=args.device, seed=args.seed)
-    print(f"trained {len(rows)} linear probes; metrics: {Path(args.output_dir) / 'probe_metrics.csv'}")
+                            device=args.device, seed=args.seed, probe_type=args.probe_type,
+                            hidden_dim=args.hidden_dim, dropout=args.dropout)
+    print(f"trained {len(rows)} {args.probe_type} probes; metrics: {Path(args.output_dir) / 'probe_metrics.csv'}")
 
 
 if __name__ == "__main__":

@@ -48,3 +48,37 @@ def test_torch_load_probe_checkpoint_requests_weights_only_false(monkeypatch, tm
     out = directions.torch_load_probe_checkpoint(tmp_path / "probe.pt")
     assert out == {"ok": True}
     assert calls["weights_only"] is False
+
+
+def test_transfer_for_scores_uses_reconstruction_baseline_and_masks_small_denominators():
+    from experiments.hdae.counterfactuals.run_swap_eval import transfer_for_scores
+
+    source = np.array([[0.2, 0.5], [0.4, 0.1]])
+    donor = np.array([[0.6, 0.5], [0.8, 0.5]])
+    recon = np.array([[0.3, 0.4], [0.5, 0.2]])
+    swaps = np.array([
+        [[0.5, 0.9], [0.7, 0.4]],
+        [[0.4, 0.9], [0.6, 0.6]],
+    ])
+    matrix, valid_counts, ratios = transfer_for_scores(source, donor, recon, swaps, eps=1e-6)
+    assert matrix[0, 0] == pytest.approx(0.5)
+    assert matrix[0, 1] == pytest.approx(0.5)
+    assert valid_counts[:, 0].tolist() == [2, 2]
+    assert valid_counts[:, 1].tolist() == [1, 1]
+    assert np.isnan(ratios[0, 0, 1])
+
+
+def test_parse_strengths_injects_zero_and_preserves_values():
+    from experiments.hdae.counterfactuals.run_preservation_sweep import parse_strengths
+
+    assert parse_strengths("0.5,1,2") == [0.0, 0.5, 1.0, 2.0]
+    assert parse_strengths("0,1") == [0.0, 1.0]
+
+
+def test_intended_target_flip_rate_is_directional():
+    from experiments.hdae.counterfactuals.run_preservation_sweep import intended_target_flip_rate
+
+    before = np.array([[0.4, 0.2], [0.6, 0.2], [0.2, 0.2]])
+    after = np.array([[0.7, 0.1], [0.8, 0.1], [0.3, 0.1]])
+    assert intended_target_flip_rate(before, after, 0, "positive") == pytest.approx(1 / 3)
+    assert intended_target_flip_rate(after, before, 0, "negative") == pytest.approx(1 / 3)
