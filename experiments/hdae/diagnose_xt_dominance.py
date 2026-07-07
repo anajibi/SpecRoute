@@ -81,8 +81,7 @@ def conditioning_attr_indices(model, dataset_attr_names):
 
 
 def encode_semantic(model, x):
-    encoded = model.encode(x)
-    return [z.clone() for z in encoded["zs"]]
+    return [z.clone() for z in model.encode(x)]
 
 
 def cond_dict(zs, y_idx):

@@ -92,9 +92,9 @@ def ensure_cached(module, dataset, indices, cache_dir, model_name, T, batch_size
             from experiments.hdae.hdae.attr_utils import to_index_space
             y_raw = torch.stack([dataset[i]["attr"][cond_indices] for i in ids]).to(device)
             y_idx = to_index_space(y_raw, model.hdae_conf.encoder.attr_input_range).to(device)
-            encoded = model.encode(imgs)
-            zs = [z.detach().cpu().float() for z in encoded["zs"]]
-            cond = {"zs": encoded["zs"], "y_idx": y_idx}
+            zs_live = model.encode(imgs)
+            zs = [z.detach().cpu().float() for z in zs_live]
+            cond = model.make_cond(zs_live, y_idx)
             x_t = module.encode_stochastic(imgs, cond, T=T).detach().cpu().float()
         for local, idx in enumerate(ids):
             torch.save({"index": int(idx), "zs": [z[local].clone() for z in zs],

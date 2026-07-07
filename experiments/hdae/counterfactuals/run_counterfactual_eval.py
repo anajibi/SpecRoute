@@ -48,15 +48,14 @@ def preservation_indices(attr_names, conditioning_attrs):
 
 def _render_recon_and_cf(module, x, y_idx, target_cond_col, direction_sign, T):
     model = module.ema_model
-    encoded = model.encode(x)
-    zs = [z.clone() for z in encoded["zs"]]
-    source_cond = {"zs": zs, "y_idx": y_idx}
+    zs = [z.clone() for z in model.encode(x)]
+    source_cond = model.make_cond(zs, y_idx)
     x_t = module.encode_stochastic(x, source_cond, T=T)
     recon0 = module.render(x_t, source_cond, T=T)
     y_cf = y_idx.clone()
     y_cf[:, target_cond_col] = 1 if direction_sign == "positive" else 0
-    cf = module.render(x_t, {"zs": zs, "y_idx": y_cf}, T=T)
-    return recon0, cf, encoded, y_cf
+    cf = module.render(x_t, model.make_cond(zs, y_cf), T=T)
+    return recon0, cf, y_cf
 
 
 def main():
@@ -99,7 +98,7 @@ def main():
         y_idx = to_index_space(y_raw, module.ema_model.hdae_conf.encoder.attr_input_range).to(device)
         real_probs = _probabilities(classifier, x)
         for direction_sign in directions:
-            recon0, cf, _encoded, y_cf = _render_recon_and_cf(module, x, y_idx, target_cond_col, direction_sign, T)
+            recon0, cf, y_cf = _render_recon_and_cf(module, x, y_idx, target_cond_col, direction_sign, T)
             recon0_probs = _probabilities(classifier, rendered_to_classifier_input(recon0))
             after = _probabilities(classifier, rendered_to_classifier_input(cf))
             delta = after - recon0_probs

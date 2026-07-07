@@ -125,9 +125,8 @@ def main():
         y_raw = batch["attr"][:len(x), cond_indices].to(device)
         y_idx = to_index_space(y_raw, model.hdae_conf.encoder.attr_input_range).to(device)
         with torch.no_grad():
-            encoded = model.encode(x)
-            zs = [z.clone() for z in encoded["zs"]]
-            source_cond = {"zs": zs, "y_idx": y_idx}
+            zs = [z.clone() for z in model.encode(x)]
+            source_cond = model.make_cond(zs, y_idx)
             x_t = module.encode_stochastic(x, source_cond, T=T)
             recon0 = module.render(x_t, source_cond, T=T)
             base_probs = classifier_probs(classifier, rendered_to_classifier_input(recon0))
@@ -136,7 +135,7 @@ def main():
                 for direction_sign in directions:
                     y_cf = y_idx.clone()
                     y_cf[:, target_cond_col] = 1 if direction_sign == "positive" else 0
-                    cf = module.render(x_t, {"zs": zs, "y_idx": y_cf}, T=T)
+                    cf = module.render(x_t, model.make_cond(zs, y_cf), T=T)
                     edit_probs = classifier_probs(classifier, rendered_to_classifier_input(cf))
                     key = (attr, direction_sign)
                     accum[key]["base"].append(base_probs)

@@ -41,8 +41,7 @@ def main():
     with torch.no_grad():
         for batch in loader:
             x = batch["img"].to(device)
-            encoded = model.encode(x)
-            zs = [z.detach().cpu().float().numpy() for z in encoded["zs"]]
+            zs = [z.detach().cpu().float().numpy() for z in model.encode(x)]
             if zs_by_level is None:
                 zs_by_level = [[] for _ in zs]
             for bucket, z in zip(zs_by_level, zs):
