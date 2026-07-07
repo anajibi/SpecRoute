@@ -37,8 +37,6 @@ def main():
     p.add_argument("--skip-train", action="store_true")
     p.add_argument("--skip-attr-classifier", action="store_true")
     p.add_argument("--attribute", default="Smiling")
-    p.add_argument("--cf-level", default="best")
-    p.add_argument("--cf-strength", type=float, default=2.0)
     p.add_argument("--num-cf-images", type=int, default=64)
     args = p.parse_args()
     import yaml
@@ -82,9 +80,8 @@ def main():
     run([py, "experiments/hdae/counterfactuals/train_attr_classifier.py", "--config", args.config, "--output", str(attr_ckpt)],
         outputs=[attr_ckpt], force=args.force, skip=args.skip_attr_classifier and attr_ckpt.exists(), reason="requested and checkpoint exists")
     run([py, "experiments/hdae/counterfactuals/run_counterfactual_eval.py", "--config", args.config, "--ckpt", str(ckpt),
-         "--probe-metrics", str(probe_metrics), "--probe-weights-dir", str(probes / "weights"),
-         "--attr-classifier", str(attr_ckpt), "--attribute", args.attribute, "--level", str(args.cf_level),
-         "--strength", str(args.cf_strength), "--num-images", str(args.num_cf_images), "--output-dir", str(cf_out)],
+         "--attr-classifier", str(attr_ckpt), "--attribute", args.attribute,
+         "--num-images", str(args.num_cf_images), "--output-dir", str(cf_out)],
         outputs=[cf_summary], force=args.force)
     logging.info("Pipeline complete. Outputs are under %s", out)
 
