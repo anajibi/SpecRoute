@@ -10,6 +10,7 @@ from experiments.hdae.hdae.grid_utils import save_labeled_grid
 from experiments.hdae.hdae.config_io import load_hdae_config
 from experiments.hdae.hdae.lit_module import HDAELitModule
 from experiments.hdae.data.datamodule import CelebAHQDataModule
+from experiments.hdae.hdae.attr_utils import to_index_space
 
 
 def metrics(x, y):
@@ -35,7 +36,7 @@ def summarize_metric_tensors(lp, mse, ssim):
             for k, v in [("lpips", lp), ("mse", mse), ("ssim", ssim)]}
 
 
-def compute_recon_metrics(module, batch, T, num_images=None):
+def compute_recon_metrics(module, batch, T, num_images=None, attribute_names=None):
     """Render reconstructions for ``batch`` and return metric tensors plus images.
 
     Inputs and outputs use the repository convention: dataset images are in
@@ -45,7 +46,11 @@ def compute_recon_metrics(module, batch, T, num_images=None):
     device = next(module.parameters()).device
     x = batch["img"][:num_images].to(device) if num_images is not None else batch["img"].to(device)
     with torch.no_grad():
-        cond = module.ema_model.encode(x)["cond"]
+        e = module.ema_model.hdae_conf.encoder
+        cond_indices = [attribute_names.index(name) for name in e.conditioning_attrs]
+        y_idx = to_index_space(batch["attr"][:len(x), cond_indices].to(device), e.attr_input_range)
+        zs = module.ema_model.encode(x)
+        cond = module.ema_model.make_cond(zs, y_idx)
         xt = module.encode_stochastic(x, cond, T=T)
         y = module.render(xt, cond, T=T) * 2 - 1
         lp, mse, ssim = metrics(x, y)
@@ -72,7 +77,7 @@ def main():
     module.to(device)
     batch = next(iter(dm.test_dataloader()))
     T = args.T or t["T_eval"]
-    result = compute_recon_metrics(module, batch, T=T, num_images=args.num_images)
+    result = compute_recon_metrics(module, batch, T=T, num_images=args.num_images, attribute_names=dm.attribute_names)
 
     out = Path(cfg.raw["output_dir"]) / "reconstruction"
     out.mkdir(parents=True, exist_ok=True)

@@ -3,7 +3,14 @@ import argparse
 import os
 import sys
 from pathlib import Path
+import warnings
 
+# Filter out the specific pkg_resources deprecation warning
+warnings.filterwarnings(
+    "ignore",
+    category=UserWarning,
+    message=".*pkg_resources is deprecated as an API.*"
+)
 # --- Imports and Path Setup ---
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT))  # Note: Consider replacing this with an editable install
@@ -66,7 +73,7 @@ def main():
         **cfg.lightning_kwargs(),
         resume_from_checkpoint=resume,
         callbacks=callbacks,
-        max_epochs=385,
+        max_epochs=210,
         logger=TensorBoardLogger(str(out), name='logs')
     )
 

@@ -1,15 +1,11 @@
 #!/usr/bin/env python
 """Run counterfactual/factual consistency metrics from cached HDAE encodings.
 
-Model specs are NAME=CONFIG,CKPT,PROBE_METRICS,PROBE_WEIGHTS_DIR. The script is
-HDAE-native; external DiffAE baselines should be adapted to the same cache/edit
-interface before being passed here.
+Model specs are NAME=CONFIG,CKPT. Legacy NAME=CONFIG,CKPT,PROBE_METRICS,PROBE_WEIGHTS_DIR entries are accepted, but probe paths are ignored because CF generation toggles conditioning only.
 """
 import argparse, csv, json, logging, sys
 from pathlib import Path
-
-ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT))
+ROOT = Path(__file__).resolve().parents[2]; sys.path.insert(0, str(ROOT))
 
 import numpy as np
 import torch
@@ -78,12 +74,12 @@ def parse_models(items):
     out = {}
     for item in items:
         if "=" not in item:
-            raise ValueError(f"expected NAME=config,ckpt,probe_metrics,weights, got {item!r}")
+            raise ValueError(f"expected NAME=config,ckpt, got {item!r}")
         name, spec = item.split("=", 1)
         parts = [Path(x) for x in spec.split(",")]
-        if len(parts) != 4:
-            raise ValueError(f"model {name!r} needs 4 comma-separated paths")
-        out[name] = {"config": parts[0], "ckpt": parts[1], "probe_metrics": parts[2], "linear_probe_weights": parts[3]}
+        if len(parts) not in {2, 4}:
+            raise ValueError(f"model {name!r} needs CONFIG,CKPT (probe paths are no longer used)")
+        out[name] = {"config": parts[0], "ckpt": parts[1]}
     return out
 
 
@@ -102,15 +98,15 @@ def classifier_probs(pretrained_eval_classifier, x):
         return torch.sigmoid(pretrained_eval_classifier(x)).detach().cpu().numpy()
 
 
-def non_target_flip_fraction(base_probs, edit_probs, target_idx, mask):
+def non_target_flip_fraction(base_probs, edit_probs, target_idx, mask, preservation_idx=None):
     if mask.sum() == 0:
         return float("nan")
-    non = [i for i in range(base_probs.shape[1]) if i != target_idx]
+    non = list(preservation_idx) if preservation_idx is not None else [i for i in range(base_probs.shape[1]) if i != target_idx]
     flips = (base_probs[mask][:, non] >= 0.5) != (edit_probs[mask][:, non] >= 0.5)
     return float(flips.mean())
 
 
-def compute_consistency(base_probs, edit_probs, target_idx, direction):
+def compute_consistency(base_probs, edit_probs, target_idx, direction, preservation_idx=None):
     if direction == "positive":
         source_mask = base_probs[:, target_idx] < 0.5
         success = source_mask & (edit_probs[:, target_idx] >= 0.5)
@@ -121,76 +117,53 @@ def compute_consistency(base_probs, edit_probs, target_idx, direction):
     n_source = int(source_mask.sum())
     n_success = int(success.sum())
     n_fail = int(fail.sum())
-
-    metrics = {
-        "counterfactual_consistency": float(n_success / n_source) if n_source else float("nan"),
-        "factual_flip_success": non_target_flip_fraction(base_probs, edit_probs, target_idx, success),
-        "factual_flip_fail": non_target_flip_fraction(base_probs, edit_probs, target_idx, fail),
-        "n_source": n_source, "n_success": n_success, "n_fail": n_fail
-    }
-    return metrics
-
-
-def load_directions(probe_metrics, linear_probe_weights, attributes, levels):
-    """Strictly loads mathematical directions from the linear probe files."""
-    logging.info("Loading linear probe directions for vector math...")
-    dirs = {}
-    for attr in attributes:
-        for level in levels:
-            try:
-                row = choose_probe_row(str(probe_metrics), attr, level=level)
-                direction, _state = direction_from_probe_checkpoint(probe_weight_path(str(linear_probe_weights), row))
-                dirs[(attr, level)] = direction
-            except Exception as exc:
-                logging.warning(f"Skipped linear direction attr={attr} level={level}: {exc}")
-    logging.info(f"Loaded {len(dirs)} total linear probe directions.")
-    return dirs
+    return {"counterfactual_consistency": float(n_success / n_source) if n_source else float("nan"),
+            "factual_flip_success": non_target_flip_fraction(base_probs, edit_probs, target_idx, success, preservation_idx),
+            "factual_flip_fail": non_target_flip_fraction(base_probs, edit_probs, target_idx, fail, preservation_idx),
+            "n_source": n_source, "n_success": n_success, "n_fail": n_fail}
 
 
 def cache_path(cache_dir, model_name, index):
     return Path(cache_dir) / model_name / f"{int(index):08d}.pt"
 
 
-def ensure_cached(module, dataset, indices, cache_dir, model_name, T, batch_size, device):
+def ensure_cached(module, dataset, indices, cache_dir, model_name, T, batch_size, device, cond_indices):
+    import torch
     model = module.ema_model
-
     missing = [idx for idx in indices if not cache_path(cache_dir, model_name, idx).exists()]
-    logging.info(f"Cache check complete: {len(indices) - len(missing)} caches found, {len(missing)} missing.")
-
     if not missing:
         return
-
-    logging.info(f"Generating caches for {len(missing)} missing items.")
     (Path(cache_dir) / model_name).mkdir(parents=True, exist_ok=True)
-
     for ids in batched(missing, batch_size):
         imgs = torch.stack([dataset[i]["img"] for i in ids]).to(device)
         with torch.inference_mode(), torch.autocast(device_type="cuda", enabled=(device == "cuda")):
-            encoded = model.encode(imgs)
-            zs = [z.detach().cpu().float() for z in encoded["zs"]]
-            cond = model.merge(encoded["zs"])
+            from experiments.hdae.hdae.attr_utils import to_index_space
+            y_raw = torch.stack([dataset[i]["attr"][cond_indices] for i in ids]).to(device)
+            y_idx = to_index_space(y_raw, model.hdae_conf.encoder.attr_input_range).to(device)
+            zs_live = model.encode(imgs)
+            zs = [z.detach().cpu().float() for z in zs_live]
+            cond = model.make_cond(zs_live, y_idx)
             x_t = module.encode_stochastic(imgs, cond, T=T).detach().cpu().float()
         for local, idx in enumerate(ids):
-            out_path = cache_path(cache_dir, model_name, idx)
             torch.save({"index": int(idx), "zs": [z[local].clone() for z in zs],
-                        "x_t": x_t[local].clone()}, out_path)
+                        "x_t": x_t[local].clone(), "y_idx": y_idx[local].detach().cpu().clone()}, cache_path(cache_dir, model_name, idx))
 
 
 def load_cached_batch(cache_dir, model_name, indices, device):
-    states = [torch.load(cache_path(cache_dir, model_name, idx), map_location="cpu", weights_only=True) for idx in
-              indices]
+    import torch
+    states = [torch.load(cache_path(cache_dir, model_name, idx), map_location="cuda") for idx in indices]
     num_levels = len(states[0]["zs"])
     zs = [torch.stack([state["zs"][level] for state in states]).to(device) for level in range(num_levels)]
     x_t = torch.stack([state["x_t"] for state in states]).to(device)
-    return zs, x_t
+    y_idx = torch.stack([state["y_idx"] for state in states]).to(device)
+    return zs, x_t, y_idx
 
 
-def score_recon0(module, pretrained_eval_classifier, zs, x_t, T, device):
+def score_recon0(module, classifier, zs, x_t, y_idx, T, device):
+    import torch
     with torch.inference_mode(), torch.autocast(device_type="cuda", enabled=(device == "cuda")):
-        cond = module.ema_model.merge(zs)
-        recon = module.render(x_t, cond, T=T)
-    return classifier_probs(pretrained_eval_classifier, recon)
-
+        recon = module.render(x_t, {"zs": zs, "y_idx": y_idx}, T=T)
+    return classifier_probs(classifier, recon)
 
 def tensor_to_pil(t):
     """Calculated translation from natively rendered [0, 1] space to [0, 255] RGB."""
@@ -325,191 +298,26 @@ def build_master_grid(edit_image_store, target_indices_map, attributes, directio
     master_canvas.save(grid_path)
     logging.info(f"Master image grid successfully saved to: {grid_path}")
 
-
-def run_model(model_name, spec, module, dataset, pretrained_eval_classifier, attr_to_idx, cohorts, attributes,
-              directions, strength, T_eval, batch_size, cache_dir, output_rows, out_dir):
-    logging.info(f"--- Initializing run for model: {model_name} ---")
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-
-    levels = list(range(len(module.ema_model.hdae_conf.encoder.level_dims)))
-    # Explicitly pull from the linear probe paths
-    dirs = load_directions(spec["probe_metrics"], spec["linear_probe_weights"], attributes, levels)
-
-    target_indices_map = {}
-    all_indices_set = set()
-
-    for attr in attributes:
-        for direction in directions:
-            req_idx = source_indices(cohorts, attr, direction)
-            target_indices_map[(attr, direction)] = req_idx[:5]
-            all_indices_set.update(req_idx)
-
-    all_indices = sorted(list(all_indices_set))
-    ensure_cached(module, dataset, all_indices, cache_dir, model_name, T_eval, batch_size, device)
-
-    logging.info("Pre-calculating base probabilities for all required indices...")
-    base_prob_map = {}
-    for ids in batched(all_indices, batch_size):
-        zs, x_t = load_cached_batch(cache_dir, model_name, ids, device)
-        base_probs = score_recon0(module, pretrained_eval_classifier, zs, x_t, T_eval, device)
-        for i, idx in enumerate(ids):
-            base_prob_map[idx] = base_probs[i]
-
-    logging.info("Building vectorized flat execution queue...")
-    execution_queue = []
-
-    for attr in attributes:
-        for direction in directions:
-            req_indices = source_indices(cohorts, attr, direction)
-            sign = 1.0 if direction == "positive" else -1.0
-
-            for level in levels:
-                if (attr, level) not in dirs:
-                    continue
-
-                for idx in req_indices:
-                    execution_queue.append({
-                        "idx": idx, "attr": attr, "direction": direction,
-                        "level": level, "dvec": dirs[(attr, level)], "sign": sign
-                    })
-
-    total_jobs = len(execution_queue)
-    logging.info(f"Queue built. Total render jobs: {total_jobs}")
-
-    results_store = {
-        (attr, direction, level): {"base_probs": [], "edit_probs": []}
-        for attr in attributes for direction in directions for level in levels
-    }
-
-    edit_image_store = {}
-
-    log_diffusion_once = True # Protection flag to prevent console spam
-
-    for batch_start in range(0, total_jobs, batch_size):
-        job_batch = execution_queue[batch_start:batch_start + batch_size]
-        logging.info(f"Processing render jobs {batch_start} to {batch_start + len(job_batch)} / {total_jobs}")
-
-        batch_indices = [job["idx"] for job in job_batch]
-        zs, x_t = load_cached_batch(cache_dir, model_name, batch_indices, device)
-
-        zs_edit = [z.clone() for z in zs]
-
-        for local_i, job in enumerate(job_batch):
-            level = job["level"]
-            dvec_tensor = torch.as_tensor(job["dvec"], dtype=zs[0].dtype, device=device)
-            zs_edit[level][local_i] += job["sign"] * float(strength) * dvec_tensor
-
-        with torch.inference_mode(), torch.autocast(device_type="cuda", enabled=(device == "cuda")):
-            cond = module.ema_model.merge(zs_edit)
-
-            # ABSOLUTE DIFFUSION INPUT VERIFICATION
-            if log_diffusion_once:
-                logging.info(f"DIFFUSION INPUT VERIFICATION: x_t min={x_t.min().item():.4f}, max={x_t.max().item():.4f}, dtype={x_t.dtype}")
-
-            edits = module.render(x_t, cond, T=T_eval)
-
-            # ABSOLUTE DIFFUSION OUTPUT VERIFICATION
-            if log_diffusion_once:
-                logging.info(f"DIFFUSION OUTPUT VERIFICATION: edits min={edits.min().item():.4f}, max={edits.max().item():.4f}, dtype={edits.dtype}")
-                log_diffusion_once = False
-
-        # Explicitly evaluate edits using the pretrained non-linear classifier
-        edit_probs = classifier_probs(pretrained_eval_classifier, edits)
-
-        for local_i, job in enumerate(job_batch):
-            attr, direction, level = job["attr"], job["direction"], job["level"]
-            idx = job["idx"]
-
-            results_store[(attr, direction, level)]["base_probs"].append(base_prob_map[idx])
-            results_store[(attr, direction, level)]["edit_probs"].append(edit_probs[local_i])
-
-            if idx in target_indices_map[(attr, direction)]:
-                key = (attr, direction, level)
-                if key not in edit_image_store:
-                    edit_image_store[key] = {}
-                edit_image_store[key][idx] = tensor_to_pil(edits[local_i])
-
-    logging.info("Aggregating final metrics...")
-    for attr in attributes:
-        target_idx = attr_to_idx[attr]
-        for direction in directions:
-            for level in levels:
-                if (attr, level) not in dirs:
-                    continue
-
-                store = results_store[(attr, direction, level)]
-                if not store["base_probs"]:
-                    continue
-
-                base_all = np.stack(store["base_probs"], axis=0)
-                edit_all = np.stack(store["edit_probs"], axis=0)
-
-                rec = compute_consistency(base_all, edit_all, target_idx, direction)
-                output_rows.append({
-                    "model": model_name, "attribute": attr, "latent_used": level,
-                    "direction": direction, **rec
-                })
-
-    build_master_grid(edit_image_store, target_indices_map, attributes, directions, levels, out_dir, model_name)
-
-
-def write_rows(path, rows):
-    fields = ["model", "attribute", "latent_used", "direction", "counterfactual_consistency",
-              "factual_flip_success", "factual_flip_fail", "n_source", "n_success", "n_fail"]
-    logging.info(f"Writing {len(rows)} rows to {path}")
-    Path(path).parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=fields)
-        writer.writeheader()
-        writer.writerows(rows)
-
-
-def main():
-    p = argparse.ArgumentParser()
-    p.add_argument("--cohorts", required=True)
-    p.add_argument("--models", nargs="+", required=True,
-                   help="NAME=config,ckpt,probe_metrics,probe_weights_dir entries")
-    p.add_argument("--attr-classifier", required=True)
-    p.add_argument("--attributes", default="Smiling,Eyeglasses,Male,Young")
-    p.add_argument("--directions", default="positive,negative")
-    p.add_argument("--strength", type=float, default=1.0)
-    p.add_argument("--T-eval", type=int, default=50)
-    p.add_argument("--batch-size", type=int, default=128)
-    p.add_argument("--cache-dir", required=True)
-    p.add_argument("--out", required=True)
-    args = p.parse_args()
-
+def run_model(args, model_name, spec, cohorts, attributes, directions, strength, T_eval, batch_size, cache_dir, attr_classifier, output_rows):
+    import torch
     from experiments.hdae.counterfactuals.attribute_classifier import load_classifier
     from experiments.hdae.data.celeba_hq import CelebAHQPacked
     from experiments.hdae.hdae.config_io import load_hdae_config
     from experiments.hdae.hdae.lit_module import HDAELitModule
 
-    logging.info("Starting execution. Parsing arguments...")
-    cohorts = json.loads(Path(args.cohorts).read_text())
-    models = parse_models(args.models)
-    attributes = parse_csv_list(args.attributes)
-    directions = parse_csv_list(args.directions)
-
-    out_dir = Path(args.out).parent
-    out_dir.mkdir(parents=True, exist_ok=True)
-
     device = "cuda" if torch.cuda.is_available() else "cpu"
-
-    logging.info("Loading unified Dataset and Pretrained Classifier...")
-    first_spec = list(models.values())[0]
-    first_cfg = load_hdae_config(str(first_spec["config"]))
-
-    dataset = CelebAHQPacked(first_cfg.raw["data"]["lmdb_path"], first_cfg.raw["data"]["attr_npz"], flip=False)
+    cfg = load_hdae_config(str(spec["config"]))
+    data = cfg.raw["data"]
+    T = T_eval or cfg.raw["train"]["T_eval"]
+    module = HDAELitModule.load_from_checkpoint(str(spec["ckpt"]), conf=cfg.train_conf, map_location="cpu").to(device).eval()
+    dataset = CelebAHQPacked(data["lmdb_path"], data["attr_npz"], flip=False)
 
     logging.info(f"Loading fine-tuned ResNet evaluation classifier from: {args.attr_classifier}")
-    ckpt = torch.load(args.attr_classifier, map_location=device)
+    out_dir = Path(args.out).parent
 
-    # Extract attribute names saved during fine-tuning
-    attr_names = [str(x) for x in ckpt["attribute_names"]]
-    attr_to_idx = {name: i for i, name in enumerate(attr_names)}
+    ckpt = torch.load(args.attr_classifier, map_location="cuda")
 
-    # Instantiate the wrapper and load the fine-tuned weights
-    pretrained_eval_classifier = HuggingFaceResNetWrapper(num_attributes=len(attr_names)).to(device)
+    pretrained_eval_classifier = HuggingFaceResNetWrapper(num_attributes=len(dataset.attribute_names)).to(device)
 
     # Handle the specific dictionary key your fine-tuning script used to save the model state
     state_dict = ckpt.get("state_dict", ckpt.get("model_state", ckpt))
@@ -524,38 +332,81 @@ def main():
     # Lock the classifier into evaluation mode strictly
     pretrained_eval_classifier.eval()
 
-
     # PRE-MODEL EVALUATION
     cohort_accuracy_path = out_dir / "cohort_classifier_accuracy.csv"
-    evaluate_cohort_accuracy(cohorts, dataset, pretrained_eval_classifier, attr_names, args.batch_size, device,
+    evaluate_cohort_accuracy(cohorts, dataset, pretrained_eval_classifier, dataset.attribute_names, args.batch_size, device,
                              cohort_accuracy_path)
 
+
+    attr_names = [str(x) for x in dataset.attribute_names]
+    attr_to_idx = {name: i for i, name in enumerate(attr_names)}
+    cond_attrs = list(module.ema_model.hdae_conf.encoder.conditioning_attrs)
+    cond_indices = [dataset.attribute_names.index(a) for a in cond_attrs]
+    preservation_idx = [i for i, name in enumerate(attr_names) if name not in set(cond_attrs)]
+
+    all_indices = sorted({idx for attr in attributes for d in directions for idx in source_indices(cohorts, attr, d)})
+    ensure_cached(module, dataset, all_indices, cache_dir, model_name, T, batch_size, device, cond_indices)
+
+    for attr in attributes:
+        target_idx = attr_to_idx[attr]
+        for direction in directions:
+            indices = source_indices(cohorts, attr, direction)
+            if attr not in cond_attrs:
+                raise ValueError(f"attribute {attr!r} is not in conditioning_attrs={cond_attrs}")
+            target_cond_col = cond_attrs.index(attr)
+            base_all, edit_all = [], []
+            for ids in batched(indices, batch_size):
+                zs, x_t, y_idx = load_cached_batch(cache_dir, model_name, ids, device)
+                base_probs = score_recon0(module, pretrained_eval_classifier, zs, x_t, y_idx, T, device)
+                import torch
+                y_cf = y_idx.clone()
+                y_cf[:, target_cond_col] = 1 if direction == "positive" else 0
+                with torch.inference_mode(), torch.autocast(device_type="cuda", enabled=(device == "cuda")):
+                    edit = module.render(x_t, {"zs": zs, "y_idx": y_cf}, T=T)
+                edit_probs = classifier_probs(pretrained_eval_classifier, edit)
+                base_all.append(base_probs); edit_all.append(edit_probs)
+            base = np.concatenate(base_all, axis=0)
+            edit = np.concatenate(edit_all, axis=0)
+            rec = compute_consistency(base, edit, target_idx, direction, preservation_idx)
+            output_rows.append({"model": model_name, "attribute": attr, "latent_used": "conditioning",
+                                "direction": direction, **rec})
+
+
+def write_rows(path, rows):
+    fields = ["model", "attribute", "latent_used", "direction", "counterfactual_consistency",
+              "factual_flip_success", "factual_flip_fail", "n_source", "n_success", "n_fail"]
+    logging.info(f"Writing {len(rows)} rows to {path}")
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=fields)
+        writer.writeheader(); writer.writerows(rows)
+
+
+def main():
+    p = argparse.ArgumentParser()
+    p.add_argument("--cohorts", required=True)
+    p.add_argument("--models", nargs="+", required=True,
+                   help="NAME=config,ckpt entries; legacy four-field specs are accepted but probe paths are ignored")
+    p.add_argument("--attr-classifier", required=True)
+    p.add_argument("--attributes", default="Smiling,Eyeglasses,Male,Young")
+    p.add_argument("--directions", default="positive,negative")
+    p.add_argument("--strength", type=float, default=1.0, help="Ignored: conditioning-only CF has no strength.")
+    p.add_argument("--T-eval", type=int, default=50)
+    p.add_argument("--batch-size", type=int, default=128)
+    p.add_argument("--cache-dir", required=True)
+    p.add_argument("--out", required=True)
+    args = p.parse_args()
+    cohorts = json.loads(Path(args.cohorts).read_text())
+    models = parse_models(args.models)
     rows = []
 
+
     for model_name, spec in models.items():
-        cfg = load_hdae_config(str(spec["config"]))
-        T_eval = args.T_eval or cfg.raw["train"]["T_eval"]
-
-        module = HDAELitModule.load_from_checkpoint(str(spec["ckpt"]), conf=cfg.train_conf, map_location="cpu").to(
-            device).eval()
-
-        run_model(model_name, spec, module, dataset, pretrained_eval_classifier, attr_to_idx, cohorts, attributes,
-                  directions,
-                  args.strength, T_eval, args.batch_size, args.cache_dir, rows, out_dir)
-
-        del module
-        torch.cuda.empty_cache()
-
+        run_model(args, model_name, spec, cohorts, parse_csv_list(args.attributes), parse_csv_list(args.directions),
+                  args.strength, args.T_eval, args.batch_size, args.cache_dir, args.attr_classifier, rows)
     write_rows(args.out, rows)
-
-    out_meta = Path(args.out).with_suffix(".json")
-    logging.info(f"Writing metadata to {out_meta}")
-    out_meta.write_text(json.dumps({
-        "rows": len(rows), "strength": args.strength,
-        "T_eval": args.T_eval, "cache_dir": args.cache_dir
-    }, indent=2))
-
-    logging.info("Script execution complete.")
+    Path(args.out).with_suffix(".json").write_text(json.dumps({"rows": len(rows), "edit_mechanism": "conditioning_signal_only_fixed_latents",
+                                                                 "T_eval": args.T_eval, "cache_dir": args.cache_dir}, indent=2))
 
 
 if __name__ == "__main__":

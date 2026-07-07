@@ -19,14 +19,10 @@ export CKPT_K5_EQ=experiments/hdae/outputs/celeba64_hier_k5_equal/checkpoints/la
 python experiments/hdae/run_cf_consistency.py \
   --cohorts experiments/hdae/outputs/cf_consistency/cohorts.json \
   --models \
-    k3=experiments/hdae/configs/celeba64_hier_k3.yaml,experiments/hdae/outputs/celeba64_hier_k3/checkpoints/last.ckpt,experiments/hdae/outputs/celeba64_hier_k3/latent_probing/probes/probe_metrics.csv,experiments/hdae/outputs/celeba64_hier_k3/latent_probing/probes/weights \
-    k5=experiments/hdae/configs/celeba64_hier_k5.yaml,experiments/hdae/outputs/celeba64_hier_k5/checkpoints/last.ckpt,experiments/hdae/outputs/celeba64_hier_k5/latent_probing/probes/probe_metrics.csv,experiments/hdae/outputs/celeba64_hier_k5/latent_probing/probes/weights \
-    k5_equal=experiments/hdae/configs/celeba64_hier_k5_equal.yaml,experiments/hdae/outputs/celeba64_hier_k5_equal/checkpoints/last.ckpt,experiments/hdae/outputs/celeba64_hier_k5_equal/latent_probing/probes/probe_metrics.csv,experiments/hdae/outputs/celeba64_hier_k5_equal/latent_probing/probes/weights \
-    k5_reverse=experiments/hdae/configs/celeba64_hier_k5_reverse.yaml,experiments/hdae/outputs/celeba64_hier_k5_reverse/checkpoints/last.ckpt,experiments/hdae/outputs/celeba64_hier_k5_reverse/latent_probing/probes/probe_metrics.csv,experiments/hdae/outputs/celeba64_hier_k5_reverse/latent_probing/probes/weights \
+    hier_k1=experiments/hdae/configs/hier_k1.yaml,experiments/hdae/outputs/hier_k1/checkpoints/last.ckpt,experiments/hdae/outputs/hier_k1/latent_probing/probes/probe_metrics.csv,experiments/hdae/outputs/hier_k1/latent_probing/probes/weights \
   --attr-classifier experiments/hdae/outputs/finetuned_attr_classifier.pt \
   --attributes Smiling,Eyeglasses,Male,Young \
   --directions positive,negative \
-  --strength 4.0 \
   --T-eval 100 \
   --batch-size 32 \
   --cache-dir experiments/hdae/outputs/cf_consistency/cache \

@@ -1,7 +1,9 @@
-"""Hierarchical semantic encoder integrated with the unchanged DiffAE decoder."""
+"""Conditional hierarchical DiffAE with per-decoder-block latent injection."""
+from diffae_upstream.model.nn import timestep_embedding
 from diffae_upstream.model.unet import BeatGANsEncoderConfig
-from diffae_upstream.model.unet_autoenc import BeatGANsAutoencModel
-from .conditioning import build_merger
+from diffae_upstream.model.unet_autoenc import AutoencReturn, BeatGANsAutoencModel
+
+from .attr_conditioner import AttributeEmbedding, PerBlockStyle
 from .hier_encoder import HierarchicalSemanticEncoder
 
 
@@ -20,21 +22,45 @@ class HierarchicalAutoencModel(BeatGANsAutoencModel):
             resblock_updown=conf.resblock_updown,
             use_new_attention_order=conf.use_new_attention_order, pool=conf.enc_pool)
         e = hdae_conf.encoder
-        self.encoder = HierarchicalSemanticEncoder(enc_conf, e.tap_resolutions, e.level_dims,
-                                                   e.pool, e.proj)
-        c = hdae_conf.conditioning
-        self.merge = build_merger(c.strategy, e.level_dims, c.style_ch, c.latent_drop_prob)
         self.hdae_conf = hdae_conf
+        self.encoder = HierarchicalSemanticEncoder(enc_conf, e.hier_tap_block_ids, e.hier_level_dims)
+        self.attr_embedding = AttributeEmbedding(e.n_attributes, e.attr_embed_dim, e.attr_dropout_prob)
+        self.per_block_style = PerBlockStyle(e.hier_level_dims, e.hier_block_to_level,
+                                             e.attr_embed_dim, conf.embed_channels)
         self.last_zs = None
 
-    def encode(self, x, null_levels=None):
-        """Encode an image and optionally force selected latent levels to learned null tokens."""
-        zs = self.encoder(x)
-        self.last_zs = zs
-        cond, null_mask = self.merge(zs, null_levels=null_levels, return_mask=True)
-        self.last_null_mask = null_mask
-        return {"cond": cond, "zs": zs, "null_mask": null_mask}
+    def encode(self, x):
+        self.last_zs = self.encoder(x)
+        return self.last_zs
 
-    def encode_with_nulls(self, x, null_levels):
-        """Convenience helper for test-time latent-level ablations."""
-        return self.encode(x, null_levels=null_levels)
+    def make_cond(self, zs, y_idx):
+        return {"zs": zs, "y_idx": y_idx}
+
+    def _styles(self, zs, y_idx):
+        return self.per_block_style(zs, self.attr_embedding(y_idx))
+
+    def forward(self, x, t, cond, t_cond=None, **_):
+        zs, y_idx = cond["zs"], cond["y_idx"]
+        t_cond = t if t_cond is None else t_cond
+        t_emb = timestep_embedding(t, self.conf.model_channels)
+        t_cond_emb = timestep_embedding(t_cond, self.conf.model_channels)
+        emb = self.time_embed.forward(time_emb=t_emb, cond=None, time_cond_emb=t_cond_emb).time_emb
+        styles = self._styles(zs, y_idx)
+
+        hs = [[] for _ in range(len(self.conf.channel_mult))]
+        h = x
+        k = 0
+        for i, n_blocks in enumerate(self.input_num_blocks):
+            for _ in range(n_blocks):
+                h = self.input_blocks[k](h, emb=emb, cond=None)
+                hs[i].append(h)
+                k += 1
+        h = self.middle_block(h, emb=emb, cond=None)
+
+        k = 0
+        for i, n_blocks in enumerate(self.output_num_blocks):
+            for _ in range(n_blocks):
+                lateral = hs[-i - 1].pop()
+                h = self.output_blocks[k](h, emb=emb, cond=styles[k], lateral=lateral)
+                k += 1
+        return AutoencReturn(pred=self.out(h), cond=cond)

@@ -1,0 +1,46 @@
+base_template: celeba64d2c_autoenc
+data:
+  image_dir: "/home/anajibi/HDM/diffae_latent_probe/data/raw_images/celeba-hq"
+  attr_path: "/home/anajibi/HDM/diffae_latent_probe/data/celeba-hq/list_attr_celeba.txt"
+  partition_path: "/home/anajibi/HDM/diffae_latent_probe/data/celeba-hq/list_eval_partition.txt"
+  image_size: 64
+  lmdb_path: "experiments/hdae/data/packed/celebahq_64.lmdb"
+  attr_npz: "experiments/hdae/data/packed/celebahq_64_attrs.npz"
+  flip_aug: true
+  resize_filter: bicubic
+encoder:
+  type: hierarchical
+  hier_tap_block_ids: [ 0, 2, 4, 6, mid ]
+  hier_level_dims: [ 103, 103, 102, 102, 102 ]
+  hier_block_to_level: [ 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4,4 ]
+  n_decoder_output_blocks: 12
+  n_attributes: 4
+  conditioning_attrs: [ Smiling, Eyeglasses, Male, Young ]
+  attr_embed_dim: 128
+  attr_dropout_prob: 0.1
+  hier_proj: linear
+  attr_input_range: auto
+conditioning:
+  strategy: per_block_attr
+  style_ch: 512
+  latent_drop_prob: 0.0
+train:
+  batch_size_per_gpu: 32
+  total_batch_size: 64
+  lr: 1.0e-4
+  ema_decay: 0.9999
+  T: 1000
+  T_eval: 100
+  max_steps: 200000
+  precision: 16-mixed
+  grad_clip: 1.0
+  num_workers: 8
+  compile: false
+lightning:
+  accelerator: gpu
+  devices: 2
+  strategy: cuda
+  log_every_n_steps: 50
+  val_check_interval: 300
+seed: 42
+output_dir: experiments/hdae/outputs/hier_k5
