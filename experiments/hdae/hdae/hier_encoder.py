@@ -1,4 +1,4 @@
-"""Semantic encoder with intermediate taps over the upstream BeatGANs down path."""
+"""Hierarchical semantic encoder with explicit upstream block taps."""
 from typing import Dict, List, Sequence
 
 import torch
@@ -8,63 +8,55 @@ from model.unet import BeatGANsEncoderConfig, BeatGANsEncoderModel
 
 
 def stage_channels(conf: BeatGANsEncoderConfig) -> Dict[int, int]:
-    """Map stage output resolution to channels, including the deepest stage."""
     return {conf.image_size // (2 ** i): int(mult * conf.model_channels)
             for i, mult in enumerate(conf.channel_mult)}
 
 
-class ProjectionHead(nn.Module):
-    def __init__(self, in_channels: int, out_dim: int, proj: str):
+class MeanStdProjectionHead(nn.Module):
+    def __init__(self, in_channels: int, out_dim: int):
         super().__init__()
-        layers = [nn.AdaptiveAvgPool2d(1), nn.Flatten(), nn.LayerNorm(in_channels)]
-        if proj == "linear":
-            layers.append(nn.Linear(in_channels, out_dim))
-        elif proj == "mlp":
-            layers.extend([nn.Linear(in_channels, in_channels), nn.SiLU(),
-                           nn.Linear(in_channels, out_dim)])
-        else:
-            raise ValueError(f"unsupported projection: {proj}")
-        self.net = nn.Sequential(*layers)
+        self.norm = nn.LayerNorm(2 * in_channels)
+        self.proj = nn.Linear(2 * in_channels, out_dim)
 
     def forward(self, x):
-        return self.net(x)
+        flat = x.flatten(2)
+        return self.proj(self.norm(torch.cat([flat.mean(-1), flat.std(-1, unbiased=False)], dim=1)))
 
 
 class HierarchicalSemanticEncoder(nn.Module):
-    """The upstream encoder backbone plus pooled heads, returned coarse-to-fine.
+    """Emit K latents from configured input-block taps and optional ``mid`` tap."""
 
-    ``tap_resolutions`` and ``level_dims`` must both be ordered coarse-to-fine
-    (smallest spatial resolution first). Hooks are deliberately avoided.
-    """
     def __init__(self, base_encoder_config: BeatGANsEncoderConfig,
-                 tap_resolutions: Sequence[int], level_dims: Sequence[int],
-                 pool: str = "adaptive_avg", proj: str = "linear"):
+                 tap_block_ids: Sequence[int | str], level_dims: Sequence[int]):
         super().__init__()
-        if len(tap_resolutions) != len(level_dims) or not tap_resolutions:
-            raise ValueError("tap_resolutions and level_dims must have equal non-zero length")
-        if pool != "adaptive_avg":
-            raise ValueError("only adaptive_avg pooling is supported")
-        if list(tap_resolutions) != sorted(tap_resolutions):
-            raise ValueError("tap_resolutions must be coarse-to-fine (ascending)")
-        channels = stage_channels(base_encoder_config)
-        invalid = sorted(set(tap_resolutions) - set(channels))
-        if invalid:
-            raise ValueError(f"invalid tap resolutions {invalid}; valid stages: {sorted(channels)}")
         self.backbone = BeatGANsEncoderModel(base_encoder_config)
-        self.tap_resolutions = list(tap_resolutions)
-        self.heads = nn.ModuleList([ProjectionHead(channels[r], d, proj)
-                                    for r, d in zip(tap_resolutions, level_dims)])
+        self.tap_block_ids = list(tap_block_ids)
+        self.tap_to_slot = {tap: i for i, tap in enumerate(self.tap_block_ids)}
+        channels = self._tap_channels(base_encoder_config)
+        self.heads = nn.ModuleList([MeanStdProjectionHead(channels[tap], dim)
+                                    for tap, dim in zip(self.tap_block_ids, level_dims)])
+
+    def _tap_channels(self, conf: BeatGANsEncoderConfig):
+        channels = {}
+        h = torch.zeros(1, conf.in_channels, conf.image_size, conf.image_size)
+        with torch.no_grad():
+            for i, block in enumerate(self.backbone.input_blocks):
+                h = block(h, emb=None)
+                if i in self.tap_to_slot:
+                    channels[i] = h.shape[1]
+            h = self.backbone.middle_block(h, emb=None)
+            if "mid" in self.tap_to_slot:
+                channels["mid"] = h.shape[1]
+        return channels
 
     def forward(self, x) -> List[torch.Tensor]:
-        h = x.type(self.backbone.dtype)
-        taps = {}
-        resolution = self.backbone.conf.image_size
-        # The stem and every res/down block are exactly the upstream modules.
-        for module in self.backbone.input_blocks:
-            h = module(h, emb=None)
-            resolution = h.shape[-1]
-            if resolution in self.tap_resolutions:
-                taps[resolution] = h.type(x.dtype)
+        h = x
+        taps = [None] * len(self.tap_block_ids)
+        for i, block in enumerate(self.backbone.input_blocks):
+            h = block(h, emb=None)
+            if i in self.tap_to_slot:
+                taps[self.tap_to_slot[i]] = h
         h = self.backbone.middle_block(h, emb=None)
-        taps[resolution] = h.type(x.dtype)  # deepest tap includes upstream middle block
-        return [head(taps[r]) for r, head in zip(self.tap_resolutions, self.heads)]
+        if "mid" in self.tap_to_slot:
+            taps[self.tap_to_slot["mid"]] = h
+        return [head(tap) for head, tap in zip(self.heads, taps)]
