@@ -60,9 +60,9 @@ def main():
     py = sys.executable
     run([py, "experiments/hdae/scripts/preprocess_data.py", "--config", args.config],
         outputs=[lmdb_meta, attr_npz], force=args.force, skip=args.skip_preprocess, reason="requested")
-    # run([py, "experiments/hdae/scripts/train.py", "--config", args.config],
-    #     outputs=[ckpt], force=args.force, skip=args.skip_train or args.ckpt is not None,
-    #     reason="requested/external checkpoint")
+    run([py, "experiments/hdae/scripts/train.py", "--config", args.config],
+        outputs=[ckpt], force=args.force, skip=args.skip_train or args.ckpt is not None,
+        reason="requested/external checkpoint")
     if not ckpt.exists():
         raise FileNotFoundError(f"checkpoint not found: {ckpt}. Pass --ckpt or run training first.")
     run([py, "experiments/hdae/scripts/reconstruct.py", "--config", args.config, "--ckpt", str(ckpt)],
@@ -77,8 +77,8 @@ def main():
         outputs=[swap_grid, swap_grid.with_suffix(".json")], force=args.force)
     run([py, "experiments/hdae/latent_probing/abduct_xt_z_grid.py", "--config", args.config, "--ckpt", str(ckpt), "--output", str(abduct_grid)],
         outputs=[abduct_grid, abduct_grid.with_suffix(".json")], force=args.force)
-    run([py, "experiments/hdae/counterfactuals/train_attr_classifier.py", "--config", args.config, "--output", str(attr_ckpt)],
-        outputs=[attr_ckpt], force=args.force, skip=args.skip_attr_classifier and attr_ckpt.exists(), reason="requested and checkpoint exists")
+    # run([py, "experiments/hdae/counterfactuals/train_attr_classifier.py", "--config", args.config, "--output", str(attr_ckpt)],
+    #     outputs=[attr_ckpt], force=args.force, skip=args.skip_attr_classifier and attr_ckpt.exists(), reason="requested and checkpoint exists")
     run([py, "experiments/hdae/counterfactuals/run_counterfactual_eval.py", "--config", args.config, "--ckpt", str(ckpt),
          "--attr-classifier", str(attr_ckpt), "--attribute", args.attribute,
          "--num-images", str(args.num_cf_images), "--output-dir", str(cf_out)],
