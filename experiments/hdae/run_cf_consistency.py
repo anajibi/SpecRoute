@@ -57,11 +57,6 @@ class HuggingFaceResNetWrapper(torch.nn.Module):
         outputs = self.cnn(pixel_values=x_norm)
         return outputs.logits
 
-from experiments.hdae.counterfactuals.directions import (
-    choose_probe_row,
-    direction_from_probe_checkpoint,
-    probe_weight_path,
-)
 
 logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(message)s")
 

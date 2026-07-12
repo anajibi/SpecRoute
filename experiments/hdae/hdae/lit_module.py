@@ -2,7 +2,7 @@
 from torch.cuda import amp
 
 from choices import TrainMode
-from experiment import LitModel
+from experiment import LitModel, ema
 
 from .attr_utils import observed_unique, to_index_space
 
@@ -45,6 +45,11 @@ class HDAELitModule(LitModel):
                 self.logger.experiment.add_scalar("loss", losses["loss"], self.num_samples)
         self._log_latents()
         return loss
+
+    def on_train_batch_end(self, outputs, batch, batch_idx: int, dataloader_idx=0) -> None:
+        if not self.is_last_accum(batch_idx):
+            return
+        ema(self.model, self.ema_model, self.conf.ema_decay)
 
     def _log_latents(self):
         for i, z in enumerate(self.model.last_zs):

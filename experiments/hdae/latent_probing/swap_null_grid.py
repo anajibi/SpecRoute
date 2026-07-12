@@ -21,6 +21,10 @@ def dynamic_zero_rows(num_levels):
     return [(f"zero_{z_label(i)}", [i]) for i in range(num_levels)]
 
 
+def dynamic_null_rows(num_levels):
+    return [(f"null_{z_label(i)}", [i]) for i in range(num_levels)]
+
+
 def replace_levels(source_zs, donor_zs, levels):
     out = [z.clone() for z in source_zs]
     for level in levels:
@@ -33,6 +37,10 @@ def zero_levels(zs, levels):
     for level in levels:
         out[level] = out[level].zero_()
     return out
+
+
+def swapped_zs(source_zs, donor_zs, levels):
+    return replace_levels(source_zs, donor_zs, levels)
 
 
 def conditioning_indices(model, attr_names):

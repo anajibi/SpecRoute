@@ -12,16 +12,13 @@ with architecture-level metrics:
 import argparse, csv, json, logging, math, sys
 from collections import defaultdict
 from pathlib import Path
+
+from hdae.counterfactuals.utils import summarize_attribute_changes
+
 ROOT = Path(__file__).resolve().parents[3]; sys.path.insert(0, str(ROOT))
 
 import numpy as np
 
-from experiments.hdae.counterfactuals.directions import (
-    choose_probe_row,
-    direction_from_probe_checkpoint,
-    probe_weight_path,
-    summarize_attribute_changes,
-)
 
 logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(message)s")
 

@@ -13,9 +13,9 @@ class AttributeEmbedding(nn.Module):
         self.attr_dropout_prob = float(attr_dropout_prob)
         self.embeddings = nn.ModuleList([nn.Embedding(3, attr_embed_dim) for _ in range(n_attributes)])
 
-    def forward(self, y_idx: torch.Tensor) -> torch.Tensor:
+    def forward(self, y_idx: torch.Tensor, apply_dropout: bool = True) -> torch.Tensor:
         y_idx = y_idx.long()
-        if self.training and self.attr_dropout_prob > 0:
+        if apply_dropout and self.training and self.attr_dropout_prob > 0:
             drop = torch.rand(y_idx.shape, device=y_idx.device) < self.attr_dropout_prob
             y_idx = torch.where(drop, torch.full_like(y_idx, 2), y_idx)
         return torch.stack([emb(y_idx[:, i]) for i, emb in enumerate(self.embeddings)], dim=0).sum(dim=0)

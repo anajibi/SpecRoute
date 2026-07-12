@@ -49,7 +49,7 @@ def main():
     latents = out / "latent_probing" / "latents.npz"
     probes = out / "latent_probing" / "probes"
     probe_metrics = probes / "probe_metrics.csv"
-    attr_ckpt = out / "counterfactuals" / "attr_classifier.pt"
+    attr_ckpt = out /  "../finetuned_attr_classifier.pt"
     probe_analysis = out / "latent_probing" / "analysis"
     probe_analysis_summary = probe_analysis / "analysis_summary.json"
     swap_grid = out / "latent_probing" / "swap_null_grid.png"

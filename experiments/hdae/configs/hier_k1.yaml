@@ -25,8 +25,8 @@ conditioning:
   style_ch: 512
   latent_drop_prob: 0.0
 train:
-  batch_size_per_gpu: 32
-  total_batch_size: 64
+  batch_size_per_gpu: 64
+  total_batch_size: 128
   lr: 1.0e-4
   ema_decay: 0.9999
   T: 1000
@@ -35,12 +35,12 @@ train:
   precision: 16-mixed
   grad_clip: 1.0
   num_workers: 8
-  compile: false
+  compile: true
 lightning:
   accelerator: gpu
   devices: 2
   strategy: cuda
   log_every_n_steps: 50
-  val_check_interval: 300
+  val_check_interval: 150
 seed: 42
 output_dir: experiments/hdae/outputs/hier_k1

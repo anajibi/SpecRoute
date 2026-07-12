@@ -1,15 +1,22 @@
 #!/usr/bin/env python
 """Attribute-conditioning counterfactual evaluation with fixed latents."""
-import argparse, csv, json, logging, sys
+import argparse
+import csv
+import json
+import logging
+import sys
 from pathlib import Path
-ROOT = Path(__file__).resolve().parents[3]; sys.path.insert(0, str(ROOT))
+
+from hdae.counterfactuals.utils import summarize_attribute_changes
+
+ROOT = Path(__file__).resolve().parents[3];
+sys.path.insert(0, str(ROOT))
 
 import numpy as np
 import torch
 from torch.utils.data import DataLoader
 
-from experiments.hdae.counterfactuals.attribute_classifier import load_classifier
-from experiments.hdae.counterfactuals.directions import summarize_attribute_changes
+from experiments.hdae.counterfactuals.attr_classifier import load_classifier
 from experiments.hdae.data.celeba_hq import CelebAHQPacked
 from experiments.hdae.hdae.attr_utils import to_index_space
 from experiments.hdae.hdae.config_io import load_hdae_config
@@ -71,18 +78,20 @@ def main():
     p.add_argument("--output-dir", required=True)
     args = p.parse_args()
 
-    out = Path(args.output_dir); out.mkdir(parents=True, exist_ok=True)
+    out = Path(args.output_dir);
+    out.mkdir(parents=True, exist_ok=True)
     cfg = load_hdae_config(args.config)
     data = cfg.raw["data"]
     device = "cuda" if torch.cuda.is_available() else "cpu"
     module = HDAELitModule.load_from_checkpoint(args.ckpt, conf=cfg.train_conf, map_location="cpu").to(device).eval()
-    classifier, clf_state = load_classifier(args.attr_classifier, device=device)
+    classifier, clf_state = load_classifier(device=device)
     attr_names = [str(x) for x in clf_state["attribute_names"]]
     target_index = attr_names.index(args.attribute)
     ds = CelebAHQPacked(data["lmdb_path"], data["attr_npz"], flip=False)
     cond_attrs, cond_indices = conditioning_attr_indices(module.ema_model, ds.attribute_names)
     if args.attribute not in cond_attrs:
-        raise ValueError(f"attribute {args.attribute!r} is not in encoder.conditioning_attrs={cond_attrs}; conditioning-only CF can only toggle conditioned attributes")
+        raise ValueError(
+            f"attribute {args.attribute!r} is not in encoder.conditioning_attrs={cond_attrs}; conditioning-only CF can only toggle conditioned attributes")
     target_cond_col = cond_attrs.index(args.attribute)
     preserve_idx = preservation_indices(attr_names, cond_attrs)
     loader = DataLoader(ds, batch_size=args.batch_size, shuffle=False, num_workers=0)
@@ -116,21 +125,23 @@ def main():
                     rec[f"delta_{name}"] = float(delta[local_i, j])
                 all_rows.append(rec)
             if first_grid is None:
-                first_grid = (x.add(1).div(2).detach().cpu(), recon0.clamp(0, 1).detach().cpu(), cf.clamp(0, 1).detach().cpu(), direction_sign)
+                first_grid = (x.add(1).div(2).detach().cpu(), recon0.clamp(0, 1).detach().cpu(),
+                              cf.clamp(0, 1).detach().cpu(), direction_sign)
         seen += len(x)
         logging.info("processed %d/%d images", min(seen, args.num_images), args.num_images)
 
     csv_path = out / f"counterfactual_{args.attribute}_conditioning.csv"
     with open(csv_path, "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=list(all_rows[0].keys()))
-        writer.writeheader(); writer.writerows(all_rows)
+        writer.writeheader();
+        writer.writerows(all_rows)
     summaries = {}
     for direction_sign in directions:
         rows = [r for r in all_rows if r["direction"] == direction_sign]
         recon0 = np.asarray([[r[f"recon0_{name}"] for name in attr_names] for r in rows])
         after = np.asarray([[r[f"after_{name}"] for name in attr_names] for r in rows])
         summaries[direction_sign] = summarize_attribute_changes(recon0, after, target_index,
-                                                                 preservation_indices=preserve_idx)
+                                                                preservation_indices=preserve_idx)
     summary = {"attribute": args.attribute, "target_index": target_index,
                "edit_mechanism": "conditioning_signal_only_fixed_latents",
                "conditioning_attrs": cond_attrs,
@@ -139,7 +150,8 @@ def main():
     (out / "summary.json").write_text(json.dumps(summary, indent=2))
     if first_grid is not None:
         orig_row, recon_row, cf_row, direction_label = first_grid
-        save_labeled_grid([orig_row, recon_row, cf_row], ["original", "recon0", f"cf_{args.attribute}_{direction_label}"],
+        save_labeled_grid([orig_row, recon_row, cf_row],
+                          ["original", "recon0", f"cf_{args.attribute}_{direction_label}"],
                           out / "counterfactual_grid.png")
     logging.info("wrote %s and summary.json", csv_path)
 

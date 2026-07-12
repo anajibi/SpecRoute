@@ -17,6 +17,11 @@ def reverse_cumulative_rows(num_levels):
             for n in range(1, num_levels + 1)]
 
 
+def complement_levels(num_levels, keep_levels):
+    keep = set(keep_levels)
+    return [i for i in range(num_levels) if i not in keep]
+
+
 def keep_only(zs, keep_levels):
     keep = set(keep_levels)
     return [z.clone() if i in keep else z.clone().zero_() for i, z in enumerate(zs)]

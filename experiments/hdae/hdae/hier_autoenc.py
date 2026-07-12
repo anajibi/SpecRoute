@@ -29,6 +29,8 @@ class HierarchicalAutoencModel(BeatGANsAutoencModel):
                                              e.attr_embed_dim, conf.embed_channels)
         self.last_zs = None
 
+        assert conf.resnet_two_cond, "per-block style needs resnet_two_cond=True or cond= is ignored"
+
     def encode(self, x):
         self.last_zs = self.encoder(x)
         return self.last_zs

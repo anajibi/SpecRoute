@@ -63,6 +63,7 @@ def main():
     from experiments.hdae.data.celeba_hq import CelebAHQPacked
     from experiments.hdae.hdae.config_io import load_hdae_config
     from experiments.hdae.hdae.lit_module import HDAELitModule
+    from experiments.hdae.hdae.attr_utils import to_index_space
 
     cfg = load_hdae_config(args.config)
     data = cfg.raw["data"]
@@ -71,10 +72,12 @@ def main():
     model = module.ema_model
     classifier, clf_state = load_classifier(args.attr_classifier, device=device)
     attr_names = [str(x) for x in clf_state["attribute_names"]]
-    num_levels = len(model.hdae_conf.encoder.level_dims)
+    ds = CelebAHQPacked(data["lmdb_path"], data["attr_npz"], flip=False)
+    encoder_conf = model.hdae_conf.encoder
+    num_levels = len(encoder_conf.level_dims)
+    cond_attr_indices = [ds.attribute_names.index(name) for name in encoder_conf.conditioning_attrs]
     T = args.T or cfg.raw["train"]["T_eval"]
 
-    ds = CelebAHQPacked(data["lmdb_path"], data["attr_npz"], flip=False)
     loader = DataLoader(ds, batch_size=args.batch_size * 2, shuffle=False, num_workers=0)
 
     source_scores, donor_scores, recon_scores = [], [], []
@@ -93,16 +96,18 @@ def main():
         donor_idx = batch["index"][n:2 * n].tolist()
 
         with torch.no_grad():
-            src = model.encode(x_source)
-            donor = model.encode(x_donor)
-            x_t = module.encode_stochastic(x_source, src["cond"], T=T)
-            recon_source = module.render(x_t, src["cond"], T=T)
+            y_source = to_index_space(batch["attr"][:n, cond_attr_indices].to(device), encoder_conf.attr_input_range)
+            src_zs = model.encode(x_source)
+            donor_zs = model.encode(x_donor)
+            src_cond = model.make_cond(src_zs, y_source)
+            x_t = module.encode_stochastic(x_source, src_cond, T=T)
+            recon_source = module.render(x_t, src_cond, T=T)
             batch_source_scores = _probabilities(classifier, x_source)
             batch_donor_scores = _probabilities(classifier, x_donor)
             batch_recon_scores = _probabilities(classifier, rendered_to_classifier_input(recon_source))
             batch_swap_scores = []
             for level in range(num_levels):
-                cond = model.merge(swapped_zs(src["zs"], donor["zs"], [level]))
+                cond = model.make_cond(swapped_zs(src_zs, donor_zs, [level]), y_source)
                 swap = module.render(x_t, cond, T=T)
                 scores = _probabilities(classifier, rendered_to_classifier_input(swap))
                 batch_swap_scores.append(scores)

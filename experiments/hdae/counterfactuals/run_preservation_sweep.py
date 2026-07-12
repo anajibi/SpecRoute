@@ -2,11 +2,13 @@
 """Toggle attribute conditioning while measuring fixed-latent preservation drift."""
 import argparse, csv, json, logging, sys
 from pathlib import Path
+
+from hdae.counterfactuals.utils import summarize_attribute_changes
+
 ROOT = Path(__file__).resolve().parents[3]; sys.path.insert(0, str(ROOT))
 
 import numpy as np
 
-from experiments.hdae.counterfactuals.directions import summarize_attribute_changes
 
 logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(message)s")
 DEFAULT_ATTRIBUTES = ["Smiling", "Eyeglasses", "Male", "Young"]
