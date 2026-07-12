@@ -7,6 +7,8 @@ import logging
 import sys
 from pathlib import Path
 
+from hdae.hdae.grid_utils import save_labeled_grid
+
 ROOT = Path(__file__).resolve().parents[3];
 sys.path.insert(0, str(ROOT))
 
@@ -173,11 +175,13 @@ def save_frontier_plot(rows, path, title):
 
 
 def evaluate_intervention(module, classifier, ds, indices, cond_indices, cond_attrs, attr_names, attr, direction,
-                          batch_size, T, device):
+                          batch_size, T, device, grid_images=0):
     target_idx = attr_names.index(attr);
     target_col = cond_attrs.index(attr)
     loader = DataLoader(Subset(ds, indices), batch_size=batch_size, shuffle=False, num_workers=4)
     bases, edits = [], []
+    grid_parts = [[], [], []]
+    grid_count = 0
     for batch in loader:
         x = batch["img"].to(device)
         y_raw = batch["attr"][:, cond_indices].to(device)
@@ -192,7 +196,14 @@ def evaluate_intervention(module, classifier, ds, indices, cond_indices, cond_at
             cf = module.render(x_t, module.ema_model.make_cond(zs, y_cf), T=T)
         bases.append(classifier_probs(classifier, rendered_to_classifier_input(recon0)))
         edits.append(classifier_probs(classifier, rendered_to_classifier_input(cf)))
-    return np.concatenate(bases, 0), np.concatenate(edits, 0)
+    if grid_images and grid_count < int(grid_images):
+        take = min(int(grid_images) - grid_count, len(x))
+        grid_parts[0].append(x[:take].add(1).div(2).detach().cpu())
+        grid_parts[1].append(recon0[:take].clamp(0, 1).detach().cpu())
+        grid_parts[2].append(cf[:take].clamp(0, 1).detach().cpu())
+        grid_count += take
+    grid_triplet = tuple(torch.cat(parts, dim=0) for parts in grid_parts) if grid_count else None
+    return np.concatenate(bases, 0), np.concatenate(edits, 0), grid_triplet
 
 
 def main():
@@ -206,6 +217,7 @@ def main():
     p.add_argument("--batch-size", type=int, default=64);
     p.add_argument("--T", type=int, default=None)
     p.add_argument("--baseline-cache", default=None)
+    p.add_argument("--grid-images", type=int, default=8, help="Number of examples per grid row for each intervention.")
     args = p.parse_args()
     out = Path(args.output_dir);
     out.mkdir(parents=True, exist_ok=True)
@@ -228,13 +240,19 @@ def main():
     cache = compute_baselines_and_weights(attrs01, attr_names, modeled,
                                           args.baseline_cache or out / "correlation_baseline.json")
     rows = []
+    grid_rows, grid_labels = [], []
     for attr in modeled:
         for direction in ["positive", "negative"]:
             indices = cohorts[attr]["neg_idx" if direction == "positive" else "pos_idx"]
             logging.info("evaluating intervention attr=%s direction=%s source_n=%d", attr, direction, len(indices))
-            base, edit = evaluate_intervention(module, classifier, ds, indices, cond_indices, cond_attrs, attr_names,
-                                               attr, direction, args.batch_size, args.T or cfg.raw["train"]["T_eval"],
-                                               device)
+            base, edit, grid_triplet = evaluate_intervention(module, classifier, ds, indices, cond_indices, cond_attrs,
+                                                             attr_names, attr, direction, args.batch_size,
+                                                             args.T or cfg.raw["train"]["T_eval"], device,
+                                                             grid_images=args.grid_images)
+            if grid_triplet is not None:
+                orig_row, recon_row, cf_row = grid_triplet
+                grid_rows.extend([orig_row, recon_row, cf_row])
+                grid_labels.extend([f"{attr} {direction} original", f"{attr} {direction} recon0", f"{attr} {direction} cf"])
             b = base >= 0.5;
             e = edit >= 0.5;
             ti = attr_names.index(attr)
@@ -261,6 +279,11 @@ def main():
                  "success_n": int(success.sum()), "unmodeled_count": len(unmodeled)})
             logging.info("result attr=%s direction=%s CC=%.4f FC_success=%.4f FC_fail=%.4f PCF=%.4f n=%d", attr,
                          direction, cc, fc_s, fc_f, pcf, int(valid.sum()))
+        break
+    if grid_rows:
+        save_labeled_grid(grid_rows, grid_labels, out / "pcf_experiments_grid.png", label_width=260)
+        logging.info("wrote PCF experiment grid with %d rows and %d images per row to %s", len(grid_rows),
+                     grid_rows[0].shape[0], out / "pcf_experiments_grid.png")
     with open(out / "pcf_per_intervention.csv", "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=list(rows[0].keys()));
         w.writeheader();

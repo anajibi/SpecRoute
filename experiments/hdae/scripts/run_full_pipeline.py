@@ -5,8 +5,12 @@ The script is intentionally a transparent orchestrator around the individual
 entrypoints. It logs every subprocess command and skips stages whose expected
 outputs already exist, so long runs are restartable and inspectable.
 """
-import argparse, logging, subprocess, sys
+import argparse
+import logging
+import subprocess
+import sys
 from pathlib import Path
+
 ROOT = Path(__file__).resolve().parents[3]
 
 logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(message)s")
@@ -31,7 +35,8 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument("--config", default="/home/anajibi/HDM/experiments/hdae/configs/hier_k1.yaml")
     p.add_argument("--output-dir", default=None)
-    p.add_argument("--ckpt", default=None, help="Existing HDAE checkpoint. If omitted, train.py is run and last.ckpt is used.")
+    p.add_argument("--ckpt", default=None,
+                   help="Existing HDAE checkpoint. If omitted, train.py is run and last.ckpt is used.")
     p.add_argument("--force", action="store_true", help="Re-run stages even if their expected outputs already exist.")
     p.add_argument("--skip-preprocess", action="store_true")
     p.add_argument("--skip-train", action="store_true")
@@ -53,7 +58,7 @@ def main():
     latents = out / "latent_probing" / "latents.npz"
     probes = out / "latent_probing" / "probes"
     probe_metrics = probes / "probe_metrics.csv"
-    attr_ckpt = out /  "../finetuned_attr_classifier.pt"
+    attr_ckpt = out / "../finetuned_attr_classifier.pt"
     probe_analysis = out / "latent_probing" / "analysis"
     probe_analysis_summary = probe_analysis / "analysis_summary.json"
     swap_grid = out / "latent_probing" / "swap_null_grid.png"
@@ -68,6 +73,7 @@ def main():
     pcf_out = out / "counterfactuals" / "pcf"
     pcf_per_intervention = pcf_out / "pcf_per_intervention.csv"
     pcf_aggregate = pcf_out / "pcf_aggregate.csv"
+    pcf_grid = pcf_out / "pcf_experiments_grid.png"
     model_name = raw.get("model_name") or raw.get("name") or Path(raw["output_dir"]).name
     safe_model_name = "".join(ch if ch.isalnum() or ch in "._-" else "_" for ch in model_name)
     ckpt = Path(args.ckpt) if args.ckpt else out / "checkpoints" / "last.ckpt"
@@ -81,31 +87,40 @@ def main():
         raise FileNotFoundError(f"checkpoint not found: {ckpt}. Pass --ckpt or run training first.")
     run([py, "experiments/hdae/scripts/reconstruct.py", "--config", args.config, "--ckpt", str(ckpt)],
         outputs=[recon_summary], force=args.force)
-    run([py, "experiments/hdae/latent_probing/extract_latents.py", "--config", args.config, "--ckpt", str(ckpt), "--output", str(latents)],
+    run([py, "experiments/hdae/latent_probing/extract_latents.py", "--config", args.config, "--ckpt", str(ckpt),
+         "--output", str(latents)],
         outputs=[latents], force=args.force)
-    run([py, "experiments/hdae/latent_probing/train_linear_probes.py", "--latents", str(latents), "--output-dir", str(probes)],
+    run([py, "experiments/hdae/latent_probing/train_linear_probes.py", "--latents", str(latents), "--output-dir",
+         str(probes)],
         outputs=[probe_metrics], force=args.force)
-    run([py, "experiments/hdae/latent_probing/analyze_probe_results.py", "--probe-metrics", str(probe_metrics), "--output-dir", str(probe_analysis)],
-        outputs=[probe_analysis_summary, probe_analysis / "probe_heatmap.png", probe_analysis / "best_level_counts.png"], force=args.force)
-    run([py, "experiments/hdae/latent_probing/swap_null_grid.py", "--config", args.config, "--ckpt", str(ckpt), "--output", str(swap_grid)],
+    run([py, "experiments/hdae/latent_probing/analyze_probe_results.py", "--probe-metrics", str(probe_metrics),
+         "--output-dir", str(probe_analysis)],
+        outputs=[probe_analysis_summary, probe_analysis / "probe_heatmap.png",
+                 probe_analysis / "best_level_counts.png"], force=args.force)
+    run([py, "experiments/hdae/latent_probing/swap_null_grid.py", "--config", args.config, "--ckpt", str(ckpt),
+         "--output", str(swap_grid)],
         outputs=[swap_grid, swap_grid.with_suffix(".json")], force=args.force)
-    run([py, "experiments/hdae/latent_probing/abduct_xt_z_grid.py", "--config", args.config, "--ckpt", str(ckpt), "--output", str(abduct_grid)],
+    run([py, "experiments/hdae/latent_probing/abduct_xt_z_grid.py", "--config", args.config, "--ckpt", str(ckpt),
+         "--output", str(abduct_grid)],
         outputs=[abduct_grid, abduct_grid.with_suffix(".json")], force=args.force)
     # run([py, "experiments/hdae/counterfactuals/train_attr_classifier.py", "--config", args.config, "--output", str(attr_ckpt)],
     #     outputs=[attr_ckpt], force=args.force, skip=args.skip_attr_classifier and attr_ckpt.exists(), reason="requested and checkpoint exists")
     run([py, "experiments/hdae/build_cohorts.py", "--attr-npz", str(attr_npz), "--attributes", modeled_attrs,
          "--num-images", str(cohort_raw["num_images"]), "--seed", str(cohort_raw["seed"]), "--output", str(cohorts)],
         outputs=[cohorts, cohort_weights], force=args.force, skip=args.skip_pcf, reason="PCF skipped")
-    run([py, "experiments/hdae/counterfactuals/run_counterfactual_eval.py", "--config", args.config, "--ckpt", str(ckpt),
+    run([py, "experiments/hdae/counterfactuals/run_counterfactual_eval.py", "--config", args.config, "--ckpt",
+         str(ckpt),
          "--attr-classifier", str(attr_ckpt), "--attribute", args.attribute,
          "--num-images", str(args.num_cf_images), "--output-dir", str(cf_out)],
         outputs=[cf_summary], force=args.force)
     run([py, "experiments/hdae/counterfactuals/run_pcf_eval.py", "--config", args.config, "--ckpt", str(ckpt),
          "--attr-classifier", str(attr_ckpt), "--cohorts", str(cohorts), "--output-dir", str(pcf_out),
          "--model-name", model_name, "--baseline-cache", str(pcf_out / "correlation_baseline.json")],
-        outputs=[pcf_per_intervention, pcf_aggregate, pcf_out / f"frontier_{safe_model_name}.png"], force=True, skip=args.skip_pcf, reason="PCF skipped")
+        outputs=[pcf_per_intervention, pcf_aggregate, pcf_grid, pcf_out / f"frontier_{safe_model_name}.png"],
+        force=args.force, skip=args.skip_pcf, reason="PCF skipped")
     logging.info("Pipeline complete. Outputs are under %s", out)
-    logging.info("PCF outputs: per-intervention=%s aggregate=%s cohort-weights=%s", pcf_per_intervention, pcf_aggregate, cohort_weights)
+    logging.info("PCF outputs: per-intervention=%s aggregate=%s cohort-weights=%s", pcf_per_intervention, pcf_aggregate,
+                 cohort_weights)
 
 
 if __name__ == "__main__":
