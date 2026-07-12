@@ -36,11 +36,30 @@ def main():
     attrs = arrays["attrs"]
     attr_names = [str(x) for x in arrays["attribute_names"]]
     out = {"attr_npz": args.attr_npz, "num_images_per_side": args.num_images, "seed": args.seed,
-           "attributes": {}}
+           "attributes": {}, "intervention_weights": {}}
     for offset, attr in enumerate(parse_csv_list(args.attributes)):
+        idx = attr_names.index(attr)
+        pos_count = int((attrs[:, idx] > 0).sum())
+        neg_count = int((attrs[:, idx] <= 0).sum())
         out["attributes"][attr] = sample_attr_indices(attrs, attr_names, attr, args.num_images, seed=args.seed + offset)
+        # Direction weights are proportional to the prevalence of the target side
+        # relative to the source side over the whole dataset. Example: if
+        # positive:negative is 1:10, positive->negative gets weight 10 and
+        # negative->positive gets weight 1.
+        out["intervention_weights"][attr] = {
+            "positive": float(pos_count / neg_count) if neg_count else 0.0,
+            "negative": float(neg_count / pos_count) if pos_count else 0.0,
+            "positive_count": pos_count,
+            "negative_count": neg_count,
+        }
     path = Path(args.output); path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(out, indent=2))
+    weights_csv = path.with_name(path.stem + "_intervention_weights.csv")
+    with weights_csv.open("w") as f:
+        f.write("attribute,direction,weight,positive_count,negative_count\n")
+        for attr, info in out["intervention_weights"].items():
+            for direction in ("positive", "negative"):
+                f.write(f"{attr},{direction},{info[direction]},{info['positive_count']},{info['negative_count']}\n")
 
 
 if __name__ == "__main__":

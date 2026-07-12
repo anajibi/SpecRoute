@@ -47,13 +47,13 @@ class HuggingFaceResNetWrapper(nn.Module):
         return outputs.logits
 
 
-def load_classifier(device):
+def load_classifier(checkpoint_path=None, device="cpu"):
     """
-    Load a HuggingFace ResNet-based attribute classifier from a local checkpoint.
+    Load a HuggingFace ResNet-based attribute classifier from a checkpoint.
     """
     import torch
 
-    checkpoint_path = "/home/anajibi/HDM/experiments/hdae/outputs/finetuned_attr_classifier.pt"
+    checkpoint_path = checkpoint_path or "/home/anajibi/HDM/experiments/hdae/outputs/finetuned_attr_classifier.pt"
     logging.info(f"Loading attribute classifier from {checkpoint_path}")
 
     # Load the state dict and attribute names
