@@ -38,14 +38,19 @@ class AttributeCFGWrapper(torch.nn.Module):
         return cond_out.__class__(pred=guided, cond=cond)
 
 
-def render_with_attribute_cfg(module, noise, cond, T=None, guidance_scale: float = 1.0):
-    """Render with optional experimental attribute classifier-free guidance."""
-    if guidance_scale == 1.0:
-        return module.render(noise, cond, T=T)
+def encode_stochastic_with_model(module, model, x, cond, T=None):
+    """DDIM reverse using the same model instance that produced ``cond``."""
     sampler = module.eval_sampler if T is None else module.conf._make_diffusion_conf(T).make_sampler()
-    guided_model = AttributeCFGWrapper(module.ema_model, guidance_scale).to(noise.device).eval()
+    out = sampler.ddim_reverse_sample_loop(model, x, model_kwargs={"cond": cond})
+    return out["sample"]
+
+
+def render_with_attribute_cfg(module, model, noise, cond, T=None, guidance_scale: float = 1.0):
+    """Render with the same model instance that produced ``noise`` and ``cond``."""
+    sampler = module.eval_sampler if T is None else module.conf._make_diffusion_conf(T).make_sampler()
+    render_model = model if guidance_scale == 1.0 else AttributeCFGWrapper(model, guidance_scale).to(noise.device).eval()
     with torch.no_grad():
-        pred_img = sampler.sample(model=guided_model, noise=noise, model_kwargs={"cond": cond})
+        pred_img = sampler.sample(model=render_model, noise=noise, model_kwargs={"cond": cond})
     return (pred_img + 1) / 2
 
 
@@ -198,15 +203,16 @@ def evaluate_intervention(module, classifier, ds, indices, cond_indices, cond_at
     grid_count = 0
     for batch in loader:
         x = batch["img"].to(device)
+        model = module.ema_model
         y_raw = batch["attr"][:, cond_indices].to(device)
-        y_idx = to_index_space(y_raw, module.ema_model.hdae_conf.encoder.attr_input_range).to(device)
+        y_idx = to_index_space(y_raw, model.hdae_conf.encoder.attr_input_range).to(device)
         with torch.no_grad():
-            zs = [z.clone() for z in module.ema_model.encode(x)]
-            source_cond = module.ema_model.make_cond(zs, y_idx)
-            x_t = module.encode_stochastic(x, source_cond, T=T)
-            recon0 = render_with_attribute_cfg(module, x_t, source_cond, T=T, guidance_scale=guidance_scale)
+            zs = [z.clone() for z in model.encode(x)]
+            source_cond = model.make_cond(zs, y_idx)
+            x_t = encode_stochastic_with_model(module, model, x, source_cond, T=T)
+            recon0 = render_with_attribute_cfg(module, model, x_t, source_cond, T=T, guidance_scale=guidance_scale)
             y_cf = y_idx.clone(); y_cf[:, target_col] = 1 if direction == "positive" else 0
-            cf = render_with_attribute_cfg(module, x_t, module.ema_model.make_cond(zs, y_cf), T=T, guidance_scale=guidance_scale)
+            cf = render_with_attribute_cfg(module, model, x_t, model.make_cond(zs, y_cf), T=T, guidance_scale=guidance_scale)
         bases.append(classifier_probs(classifier, rendered_to_classifier_input(recon0)))
         edits.append(classifier_probs(classifier, rendered_to_classifier_input(cf)))
         if grid_images and grid_count < int(grid_images):
