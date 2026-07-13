@@ -3,14 +3,12 @@
 import argparse, logging, sys
 from pathlib import Path
 
-from hdae.counterfactuals.attr_classifier import HuggingFaceResNetWrapper
-
 ROOT = Path(__file__).resolve().parents[3];
 sys.path.insert(0, str(ROOT))
 
 import torch
 
-
+from experiments.hdae.counterfactuals.attr_classifier import HuggingFaceResNetWrapper
 from experiments.hdae.data.datamodule import CelebAHQDataModule
 from experiments.hdae.hdae.config_io import load_hdae_config
 from experiments.hdae.counterfactuals.attribute_classifier import (
@@ -62,8 +60,8 @@ def main():
                      val["label_accuracy"])
         if val["loss"] < best["loss"]:
             best = {"epoch": epoch, "train_loss": train_loss, **val}
-            # Passes 224 as the explicit image dimension the classifier operates on
-            save_classifier(args.output, model, dm.attribute_names, 224, best)
+            # The classifier now operates directly at the packed dataset resolution.
+            save_classifier(args.output, model, dm.attribute_names, data["image_size"], best)
             logging.info("saved new best classifier to %s", args.output)
 
     logging.info("done; best=%s", best)

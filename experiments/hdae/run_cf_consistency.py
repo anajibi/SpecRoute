@@ -12,7 +12,6 @@ import torch
 import torchvision
 from PIL import Image, ImageDraw, ImageFont
 
-import torch.nn.functional as F
 from transformers import AutoImageProcessor, AutoModelForImageClassification
 
 
@@ -43,11 +42,10 @@ class HuggingFaceResNetWrapper(torch.nn.Module):
         # We unconditionally apply this because the pipeline strictly outputs [-1, 1].
         x = x.clamp(0.0, 1.0)
 
-        # 2. Interpolate to 128x128 to protect spatial features from pooling collapse
-        x_resized = F.interpolate(x, size=(128, 128), mode='bilinear', align_corners=False)
-
-        # 3. Apply ImageNet Normalization
-        x_norm = (x_resized - self.mean) / self.std
+        # 2. Apply ImageNet normalization directly at native 64x64 resolution.
+        # The ResNet backbone is convolutional/global-pooling based and supports
+        # variable spatial sizes, so avoid blur/cost from upsampling.
+        x_norm = (x - self.mean) / self.std
 
         # ABSOLUTE FINAL DATA RANGE VERIFICATION
         if not self.logged_range:
