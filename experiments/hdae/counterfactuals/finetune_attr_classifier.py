@@ -30,6 +30,9 @@ def main():
     p.add_argument("--num-workers", type=int, default=8)
     # CRITICAL: Dropped default from 1e-3 to 2e-5 to protect pre-trained weights
     p.add_argument("--lr", type=float, default=2e-5)
+    p.add_argument("--weight-decay", type=float, default=1e-2)
+    p.add_argument("--grad-clip", type=float, default=1.0)
+    p.add_argument("--model-name", default="microsoft/resnet-50")
     p.add_argument("--device", default="cuda")
     args = p.parse_args()
 
@@ -42,16 +45,13 @@ def main():
     dm = CelebAHQDataModule(data["lmdb_path"], data["attr_npz"], args.batch_size, args.num_workers, flip_aug=True)
     dm.setup()
 
-    # Swapped out CelebAAttributeCNN for our self-contained ViT wrapper
-    model = HuggingFaceResNetWrapper(num_attributes=len(dm.attribute_names)).to(device)
-
-    # Using AdamW with standard transformer weight decay configurations
-    opt = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-2)
+    model = HuggingFaceResNetWrapper(model_name=args.model_name, num_attributes=len(dm.attribute_names)).to(device)
+    opt = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
 
     best = {"loss": float("inf")}
     for epoch in range(args.epochs):
         model.train()
-        train_loss = train_epoch(model, dm.train_dataloader(), opt, device)
+        train_loss = train_epoch(model, dm.train_dataloader(), opt, device, grad_clip=args.grad_clip)
 
         model.eval()
         val = evaluate(model, dm.val_dataloader(), device)
