@@ -32,6 +32,14 @@ class ConditioningConfig:
     strategy: str = "per_block_attr"
     style_ch: int = 512
     latent_drop_prob: float = 0.0
+    cfg_drop_prob: float = 0.1
+    cfg_guidance_scale: float = 2.0
+
+    def __post_init__(self):
+        if not 0 <= float(self.cfg_drop_prob) < 1:
+            raise ValueError("cfg_drop_prob must be in [0, 1)")
+        if float(self.cfg_guidance_scale) < 1:
+            raise ValueError("cfg_guidance_scale must be >= 1")
 
 
 @dataclass

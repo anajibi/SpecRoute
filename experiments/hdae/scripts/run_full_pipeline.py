@@ -33,7 +33,7 @@ def run(cmd, *, outputs=(), force=False, skip=False, reason=""):
 
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument("--config", default="/home/anajibi/HDM/experiments/hdae/configs/hier_k1.yaml")
+    p.add_argument("--config", default="/home/anajibi/HDM/experiments/hdae/configs/hier_k5.yaml")
     p.add_argument("--output-dir", default=None)
     p.add_argument("--ckpt", default=None,
                    help="Existing HDAE checkpoint. If omitted, train.py is run and last.ckpt is used.")
@@ -45,6 +45,8 @@ def main():
     p.add_argument("--num-cf-images", type=int, default=64)
     p.add_argument("--cohort-config", default="experiments/hdae/configs/cohorts.yaml",
                    help="Global, model-agnostic cohort settings shared across all model configs.")
+    p.add_argument("--pcf-guidance-scale", type=float, default=5.0,
+                   help="Experimental attribute-CFG scale passed to PCF rendering; 1.0 disables guidance blending.")
     p.add_argument("--skip-pcf", action="store_true")
     args = p.parse_args()
     import yaml
@@ -115,9 +117,10 @@ def main():
         outputs=[cf_summary], force=args.force)
     run([py, "experiments/hdae/counterfactuals/run_pcf_eval.py", "--config", args.config, "--ckpt", str(ckpt),
          "--attr-classifier", str(attr_ckpt), "--cohorts", str(cohorts), "--output-dir", str(pcf_out),
-         "--model-name", model_name, "--baseline-cache", str(pcf_out / "correlation_baseline.json")],
+         "--model-name", model_name, "--baseline-cache", str(pcf_out / "correlation_baseline.json"),
+         "--guidance-scale", str(args.pcf_guidance_scale)],
         outputs=[pcf_per_intervention, pcf_aggregate, pcf_grid, pcf_out / f"frontier_{safe_model_name}.png"],
-        force=args.force, skip=args.skip_pcf, reason="PCF skipped")
+        force=True, skip=args.skip_pcf, reason="PCF skipped")
     logging.info("Pipeline complete. Outputs are under %s", out)
     logging.info("PCF outputs: per-intervention=%s aggregate=%s cohort-weights=%s", pcf_per_intervention, pcf_aggregate,
                  cohort_weights)

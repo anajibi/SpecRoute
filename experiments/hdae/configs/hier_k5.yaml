@@ -17,13 +17,15 @@ encoder:
   n_attributes: 4
   conditioning_attrs: [ Smiling, Eyeglasses, Male, Young ]
   attr_embed_dim: 128
-  attr_dropout_prob: 0.1
+  attr_dropout_prob: 0.0
   hier_proj: linear
   attr_input_range: auto
 conditioning:
   strategy: per_block_attr
   style_ch: 512
   latent_drop_prob: 0.0
+  cfg_drop_prob: 0.1
+  cfg_guidance_scale: 3.0
 train:
   batch_size_per_gpu: 32
   total_batch_size: 64

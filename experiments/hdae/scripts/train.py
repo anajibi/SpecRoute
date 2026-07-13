@@ -73,7 +73,7 @@ def main():
         **cfg.lightning_kwargs(),
         resume_from_checkpoint=resume,
         callbacks=callbacks,
-        max_epochs=210,
+        max_epochs=300,
         logger=TensorBoardLogger(str(out), name='logs')
     )
 

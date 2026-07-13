@@ -24,7 +24,8 @@ class HierarchicalAutoencModel(BeatGANsAutoencModel):
         e = hdae_conf.encoder
         self.hdae_conf = hdae_conf
         self.encoder = HierarchicalSemanticEncoder(enc_conf, e.hier_tap_block_ids, e.hier_level_dims)
-        self.attr_embedding = AttributeEmbedding(e.n_attributes, e.attr_embed_dim, e.attr_dropout_prob)
+        self.attr_embedding = AttributeEmbedding(e.n_attributes, e.attr_embed_dim, e.attr_dropout_prob,
+                                                 hdae_conf.conditioning.cfg_drop_prob)
         self.per_block_style = PerBlockStyle(e.hier_level_dims, e.hier_block_to_level,
                                              e.attr_embed_dim, conf.embed_channels)
         self.last_zs = None
