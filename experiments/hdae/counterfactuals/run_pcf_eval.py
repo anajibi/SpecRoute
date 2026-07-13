@@ -232,15 +232,16 @@ def main():
     p.add_argument("--model-name", default="hdae"); p.add_argument("--batch-size", type=int, default=16); p.add_argument("--T", type=int, default=None)
     p.add_argument("--baseline-cache", default=None)
     p.add_argument("--grid-images", type=int, default=8, help="Number of examples per grid row for each intervention.")
-    p.add_argument("--guidance-scale", type=float, default=1.0,
-                   help="Experimental attribute-CFG scale for rendering; 1.0 disables guidance blending.")
+    p.add_argument("--guidance-scale", type=float, default=None,
+                   help="Experimental attribute-CFG scale for rendering; defaults to conditioning.cfg_guidance_scale from config.")
     args = p.parse_args()
     out = Path(args.output_dir); out.mkdir(parents=True, exist_ok=True)
     cfg = load_hdae_config(args.config); data = cfg.raw["data"]
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    if args.guidance_scale < 1.0:
-        raise ValueError("--guidance-scale must be >= 1.0")
-    logging.info("loading HDAE checkpoint=%s on device=%s guidance_scale=%.3f", args.ckpt, device, args.guidance_scale)
+    guidance_scale = float(args.guidance_scale if args.guidance_scale is not None else cfg.hdae_conf.conditioning.cfg_guidance_scale)
+    if guidance_scale < 1.0:
+        raise ValueError("--guidance-scale / conditioning.cfg_guidance_scale must be >= 1.0")
+    logging.info("loading HDAE checkpoint=%s on device=%s guidance_scale=%.3f", args.ckpt, device, guidance_scale)
     module = HDAELitModule.load_from_checkpoint(args.ckpt, conf=cfg.train_conf, map_location="cpu").to(device).eval()
     classifier, clf_state = load_classifier(args.attr_classifier, device=device)
     attr_names = [str(x) for x in clf_state["attribute_names"]]
@@ -259,7 +260,7 @@ def main():
         for direction in ["positive", "negative"]:
             indices = cohorts[attr]["neg_idx" if direction == "positive" else "pos_idx"]
             logging.info("evaluating intervention attr=%s direction=%s source_n=%d", attr, direction, len(indices))
-            base, edit, grid_triplet = evaluate_intervention(module, classifier, ds, indices, cond_indices, cond_attrs, attr_names, attr, direction, args.batch_size, args.T or cfg.raw["train"]["T_eval"], device, grid_images=args.grid_images, guidance_scale=args.guidance_scale)
+            base, edit, grid_triplet = evaluate_intervention(module, classifier, ds, indices, cond_indices, cond_attrs, attr_names, attr, direction, args.batch_size, args.T or cfg.raw["train"]["T_eval"], device, grid_images=args.grid_images, guidance_scale=guidance_scale)
             if grid_triplet is not None:
                 orig_row, recon_row, cf_row = grid_triplet
                 grid_rows.extend([orig_row, recon_row, cf_row])
@@ -278,7 +279,7 @@ def main():
                 return float(1.0 - excess.mean()), excess
             fc_s, excess_s = fc_for(success); fc_f, _ = fc_for(fail)
             pcf = 0.0 if cc + fc_s == 0 else float(2 * cc * fc_s / (cc + fc_s))
-            rows.append({"model": args.model_name, "guidance_scale": args.guidance_scale, "attribute": attr, "direction": direction, "CC": cc, "FC_success": fc_s, "FC_fail": fc_f, "PCF": pcf, "n": int(valid.sum()), "cohort_n": len(indices), "weight": cache["intervention_weights"][attr][direction], "excess_sum_success": float(excess_s.sum()), "success_n": int(success.sum()), "unmodeled_count": len(unmodeled)})
+            rows.append({"model": args.model_name, "guidance_scale": guidance_scale, "attribute": attr, "direction": direction, "CC": cc, "FC_success": fc_s, "FC_fail": fc_f, "PCF": pcf, "n": int(valid.sum()), "cohort_n": len(indices), "weight": cache["intervention_weights"][attr][direction], "excess_sum_success": float(excess_s.sum()), "success_n": int(success.sum()), "unmodeled_count": len(unmodeled)})
             logging.info("result attr=%s direction=%s CC=%.4f FC_success=%.4f FC_fail=%.4f PCF=%.4f n=%d", attr, direction, cc, fc_s, fc_f, pcf, int(valid.sum()))
     if grid_rows:
         save_labeled_grid(grid_rows, grid_labels, out / "pcf_experiments_grid.png", label_width=260)
@@ -294,7 +295,7 @@ def main():
     micro = 0.0 if global_cc + global_fc == 0 else float(2 * global_cc * global_fc / (global_cc + global_fc))
     points = [(r["CC"], r["FC_success"], f"{r['attribute']} {r['direction']}") for r in rows]
     area = frontier_area(pareto_frontier(points))
-    agg = {"model": args.model_name, "guidance_scale": args.guidance_scale, "macro_PCF": macro, "micro_PCF": micro, "weighted_PCF": weighted, "frontier_area": area, "micro_macro_gap": micro - macro}
+    agg = {"model": args.model_name, "guidance_scale": guidance_scale, "macro_PCF": macro, "micro_PCF": micro, "weighted_PCF": weighted, "frontier_area": area, "micro_macro_gap": micro - macro}
     with open(out / "pcf_aggregate.csv", "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=list(agg.keys())); w.writeheader(); w.writerow(agg)
     save_frontier_plot(rows, out / f"frontier_{safe_model_name(args.model_name)}.png", f"CC-FC frontier: {args.model_name}")

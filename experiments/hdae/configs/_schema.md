@@ -17,6 +17,8 @@
 | `conditioning.strategy` | `concat_proj`; `per_resolution` is reserved/experimental. |
 | `conditioning.style_ch` | Decoder semantic conditioning width; must equal `sum(level_dims)`. |
 | `conditioning.latent_drop_prob` | Per-sample, per-level probability of replacing that latent with its learned null token during training; default `0.12`. |
+| `conditioning.cfg_drop_prob` | Per-sample probability of replacing all modeled attributes with the learned null attribute token during training for classifier-free guidance; recommended default `0.1`. |
+| `conditioning.cfg_guidance_scale` | Default attribute-CFG inference scale used by PCF when no CLI override is passed; recommended default `2.0` for a moderate edit-strength/preservation tradeoff. |
 | `train.batch_size_per_gpu`, `total_batch_size` | Local/global batch; global must equal local times devices. |
 | `train.lr`, `ema_decay`, `T`, `T_eval` | Upstream learning rate, EMA, train diffusion steps, and DDIM evaluation steps. |
 | `train.max_steps`, `precision`, `grad_clip`, `num_workers` | Trainer/runtime settings. |
