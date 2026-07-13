@@ -91,32 +91,42 @@ def batched(seq, n):
         yield seq[start:start + n]
 
 
-def evaluate_cohort_classifier_accuracy(cohorts, dataset, classifier, attr_names, batch_size, device, out_path):
-    """Evaluate frozen attribute-CNN accuracy on every unique real image in the fixed cohorts."""
+def evaluate_cohort_reconstruction_classifier_accuracy(cohorts, dataset, module, cond_indices, classifier, attr_names, batch_size, device, out_path, T, guidance_scale):
+    """Evaluate classifier accuracy on recon0 outputs for every unique fixed-cohort image."""
     all_indices = sorted({int(idx)
                           for attr_data in cohorts.get("attributes", {}).values()
                           for side in ("pos_idx", "neg_idx")
                           for idx in attr_data.get(side, [])})
-    logging.info("evaluating cohort classifier accuracy on %d unique real images", len(all_indices))
+    logging.info("evaluating classifier accuracy on %d reconstructed cohort images", len(all_indices))
     correct = {name: 0 for name in attr_names}
     total = len(all_indices)
+    model = module.ema_model
     for ids in batched(all_indices, batch_size):
         imgs = torch.stack([dataset[i]["img"] for i in ids]).to(device)
         gt = torch.stack([torch.as_tensor(dataset[i]["attr"]) for i in ids]).cpu().numpy()
-        probs = classifier_probs(classifier, imgs)
+        y_raw = torch.stack([dataset[i]["attr"][cond_indices] for i in ids]).to(device)
+        y_idx = to_index_space(y_raw, model.hdae_conf.encoder.attr_input_range).to(device)
+        with torch.no_grad():
+            zs = [z.clone() for z in model.encode(imgs)]
+            cond = model.make_cond(zs, y_idx)
+            x_t = encode_stochastic_with_model(module, model, imgs, cond, T=T)
+            recon0 = render_with_attribute_cfg(module, model, x_t, cond, T=T, guidance_scale=guidance_scale)
+        probs = classifier_probs(classifier, recon0)
         preds = (probs >= 0.5).astype(np.int8)
         gt01 = (gt > 0).astype(np.int8)
         for j, name in enumerate(attr_names):
             correct[name] += int((preds[:, j] == gt01[:, j]).sum())
     rows = [{"attribute": name,
+             "image_source": "recon0",
+             "guidance_scale": guidance_scale,
              "accuracy": float(correct[name] / total) if total else float("nan"),
              "samples_evaluated": total,
              "correct_predictions": correct[name]}
             for name in attr_names]
     with open(out_path, "w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=["attribute", "accuracy", "samples_evaluated", "correct_predictions"])
+        writer = csv.DictWriter(f, fieldnames=["attribute", "image_source", "guidance_scale", "accuracy", "samples_evaluated", "correct_predictions"])
         writer.writeheader(); writer.writerows(rows)
-    logging.info("wrote cohort classifier accuracy for all attributes to %s", out_path)
+    logging.info("wrote reconstructed-cohort classifier accuracy for all attributes to %s", out_path)
 
 
 def classifier_probs(classifier, x):
@@ -250,7 +260,8 @@ def main():
     modeled, unmodeled = assert_partition(attr_names, cond_attrs)
     logging.info("attribute partition fixed: modeled=%s unmodeled_count=%d", modeled, len(unmodeled))
     cohorts_doc = json.loads(Path(args.cohorts).read_text())
-    evaluate_cohort_classifier_accuracy(cohorts_doc, ds, classifier, attr_names, args.batch_size, device, out / "cohort_classifier_accuracy.csv")
+    T_eval = args.T or cfg.raw["train"]["T_eval"]
+    evaluate_cohort_reconstruction_classifier_accuracy(cohorts_doc, ds, module, cond_indices, classifier, attr_names, args.batch_size, device, out / "cohort_classifier_accuracy.csv", T_eval, guidance_scale)
     cohorts = cohorts_doc["attributes"]
     attrs01 = (np.load(data["attr_npz"], allow_pickle=True)["attrs"] > 0).astype(np.int8)
     cache = compute_baselines_and_weights(attrs01, attr_names, modeled, args.baseline_cache or out / "correlation_baseline.json")
@@ -260,7 +271,7 @@ def main():
         for direction in ["positive", "negative"]:
             indices = cohorts[attr]["neg_idx" if direction == "positive" else "pos_idx"]
             logging.info("evaluating intervention attr=%s direction=%s source_n=%d", attr, direction, len(indices))
-            base, edit, grid_triplet = evaluate_intervention(module, classifier, ds, indices, cond_indices, cond_attrs, attr_names, attr, direction, args.batch_size, args.T or cfg.raw["train"]["T_eval"], device, grid_images=args.grid_images, guidance_scale=guidance_scale)
+            base, edit, grid_triplet = evaluate_intervention(module, classifier, ds, indices, cond_indices, cond_attrs, attr_names, attr, direction, args.batch_size, T_eval, device, grid_images=args.grid_images, guidance_scale=guidance_scale)
             if grid_triplet is not None:
                 orig_row, recon_row, cf_row = grid_triplet
                 grid_rows.extend([orig_row, recon_row, cf_row])
