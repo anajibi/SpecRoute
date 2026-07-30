@@ -1,83 +1,24 @@
-export PYTHONPATH=$PWD
-export NIMG=25
-export T_EVAL=100
+#!/bin/bash
 
-export ATTR_CLF=experiments/hdae/outputs/shared_attr_classifier.pt
+#echo "Launching k1 run..."
+#nohup python experiments/hdae/scripts/run_full_pipeline.py \
+#  --config /home/anajibi/HDM/experiments/hdae/configs/hier_k1.yaml \
+#  --pcf-guidance-scale 8.0 > run_k1.log 2>&1 &
 
-export CFG_FLAT=experiments/hdae/configs/celeba64_flat.yaml
-export CFG_K3=experiments/hdae/configs/celeba64_hier_k3.yaml
-export CFG_K5=experiments/hdae/configs/celeba64_hier_k5.yaml
-export CFG_K5_REV=experiments/hdae/configs/celeba64_hier_k5_reverse.yaml
-export CFG_K5_EQ=experiments/hdae/configs/celeba64_hier_k5_equal.yaml
+echo "Launching k5 run..."
+nohup python experiments/hdae/scripts/run_full_pipeline.py \
+  --config /home/anajibi/HDM/experiments/hdae/configs/hier_k5.yaml \
+  --pcf-guidance-scale 8.0 > run_k5.log 2>&1 &
 
-export CKPT_FLAT=experiments/hdae/outputs/celeba64_flat/checkpoints/last.ckpt
-export CKPT_K3=experiments/hdae/outputs/celeba64_hier_k3/checkpoints/last.ckpt
-export CKPT_K5=experiments/hdae/outputs/celeba64_hier_k5/checkpoints/last.ckpt
-export CKPT_K5_REV=experiments/hdae/outputs/celeba64_hier_k5_reverse/checkpoints/last.ckpt
-export CKPT_K5_EQ=experiments/hdae/outputs/celeba64_hier_k5_equal/checkpoints/last.ckpt
+echo "Launching k11 run..."
+nohup python experiments/hdae/scripts/run_full_pipeline.py \
+  --config /home/anajibi/HDM/experiments/hdae/configs/hier_k11.yaml \
+  --pcf-guidance-scale 8.0 > run_k11.log 2>&1 &
 
-python experiments/hdae/run_cf_consistency.py \
-  --cohorts experiments/hdae/outputs/cf_consistency/cohorts.json \
-  --models \
-    hier_k1=experiments/hdae/configs/hier_k1.yaml,experiments/hdae/outputs/hier_k1/checkpoints/last.ckpt,experiments/hdae/outputs/hier_k1/latent_probing/probes/probe_metrics.csv,experiments/hdae/outputs/hier_k1/latent_probing/probes/weights \
-  --attr-classifier experiments/hdae/outputs/finetuned_attr_classifier.pt \
-  --attributes Smiling,Eyeglasses,Male,Young \
-  --directions positive,negative \
-  --T-eval 100 \
-  --batch-size 32 \
-  --cache-dir experiments/hdae/outputs/cf_consistency/cache \
-  --out experiments/hdae/outputs/cf_consistency/cf_consistency_strength1.csv
+echo "All three processes launched in the background."
+echo "Waiting for all to complete. You can tail the log files to check progress..."
 
+# 'wait' ensures the script doesn't exit until all background jobs (&) are done
+wait
 
-
-#python experiments/hdae/counterfactuals/run_preservation_sweep.py \
-#  --config "$CFG_K5" \
-#  --ckpt "$CKPT_K5" \
-#  --probe-metrics experiments/hdae/outputs/celeba64_hier_k5/latent_probing/probes_linear/probe_metrics.csv \
-#  --probe-weights-dir experiments/hdae/outputs/celeba64_hier_k5/latent_probing/probes_linear/weights \
-#  --attr-classifier "$ATTR_CLF" \
-#  --attributes Smiling,Eyeglasses,Male,Young \
-#  --strengths 0,0.5,1,2,4 \
-#  --direction both \
-#  --num-images "$NIMG" \
-#  --batch-size 128 \
-#  --T "$T_EVAL" \
-#  --normalize-strength \
-#  --per-attribute-matrix \
-#  --save-grids \
-#  --output-dir experiments/hdae/outputs/celeba64_hier_k5/counterfactuals/preservation_sweep_small
-#
-#python experiments/hdae/counterfactuals/run_preservation_sweep.py \
-#  --config "$CFG_K5_REV" \
-#  --ckpt "$CKPT_K5_REV" \
-#  --probe-metrics experiments/hdae/outputs/celeba64_hier_k5_reverse/latent_probing/probes_linear/probe_metrics.csv \
-#  --probe-weights-dir experiments/hdae/outputs/celeba64_hier_k5_reverse/latent_probing/probes_linear/weights \
-#  --attr-classifier "$ATTR_CLF" \
-#  --attributes Smiling,Eyeglasses,Male,Young \
-#  --strengths 0,0.5,1,2,4 \
-#  --direction both \
-#  --num-images "$NIMG" \
-#  --batch-size 128 \
-#  --T "$T_EVAL" \
-#  --normalize-strength \
-#  --per-attribute-matrix \
-#  --save-grids \
-#  --output-dir experiments/hdae/outputs/celeba64_hier_k5_reverse/counterfactuals/preservation_sweep_small
-#
-#
-#python experiments/hdae/counterfactuals/run_preservation_sweep.py \
-#  --config "$CFG_K5_EQ" \
-#  --ckpt "$CKPT_K5_EQ" \
-#  --probe-metrics experiments/hdae/outputs/celeba64_hier_k5_equal/latent_probing/probes_linear/probe_metrics.csv \
-#  --probe-weights-dir experiments/hdae/outputs/celeba64_hier_k5_equal/latent_probing/probes_linear/weights \
-#  --attr-classifier "$ATTR_CLF" \
-#  --attributes Smiling,Eyeglasses,Male,Young \
-#  --strengths 0,0.5,1,2,4 \
-#  --direction both \
-#  --num-images "$NIMG" \
-#  --batch-size 128 \
-#  --T "$T_EVAL" \
-#  --normalize-strength \
-#  --per-attribute-matrix \
-#  --save-grids \
-#  --output-dir experiments/hdae/outputs/celeba64_hier_k5_equal/counterfactuals/preservation_sweep_small
+echo "All parallel runs completed."

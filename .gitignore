@@ -18,6 +18,7 @@ diffae_latent_probe/latents/
 *.pt
 *.pth
 *.ckpt
+/checkpoints/
 
 # Logs, caches and editor metadata
 logs/

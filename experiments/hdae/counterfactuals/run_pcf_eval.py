@@ -214,9 +214,11 @@ def evaluate_intervention(module, classifier, ds, indices, cond_indices, cond_at
     bases, edits = [], []
     grid_parts = [[], [], []]
     grid_count = 0
+
+    model = module.ema_model
+
     for batch in loader:
         x = batch["img"].to(device)
-        model = torch.compile(module.ema_model)
         y_raw = batch["attr"][:, cond_indices].to(device)
         y_idx = to_index_space(y_raw, model.hdae_conf.encoder.attr_input_range).to(device)
         with torch.inference_mode():
@@ -284,6 +286,7 @@ def main():
                                           args.baseline_cache or out / "correlation_baseline.json")
     rows = []
     grid_rows, grid_labels = [], []
+    module.ema_model = torch.compile(module.ema_model)
     for attr in modeled:
         for direction in ["positive", "negative"]:
             indices = cohorts[attr]["neg_idx" if direction == "positive" else "pos_idx"]
@@ -303,23 +306,38 @@ def main():
             un_idx = [attr_names.index(u) for u in unmodeled]
             expected = np.asarray([cache["baseline"][attr][direction][u] for u in unmodeled])
 
-            # def fc_for(mask):
-            #     if not mask.any(): return 1.0, np.zeros(len(un_idx))
-            #     observed = (b[mask][:, un_idx] != e[mask][:, un_idx]).mean(axis=0)
-            #     excess = np.maximum(0.0, observed - expected)
-            #     return float(1.0 - excess.mean()), excess
-
             def fc_for(mask):
                 if not mask.any():
-                    return 1.0, np.zeros(len(un_idx))
+                    # (fc_raw, fc_corr, raw_flip_vec, excess_vec)
+                    return 1.0, 1.0, np.zeros(len(un_idx)), np.zeros(len(un_idx))
                 observed = (b[mask][:, un_idx] != e[mask][:, un_idx]).mean(axis=0)
-                return float(1.0 - observed.mean()), observed
+                excess = np.maximum(0.0, observed - expected)
+                fc_raw = float(1.0 - observed.mean())
+                fc_corr = float(1.0 - excess.mean())
+                return fc_raw, fc_corr, observed, excess
 
-            fc_s, excess_s = fc_for(success);
-            fc_f, _ = fc_for(fail)
-            pcf = 0.0 if cc + fc_s == 0 else float(2 * cc * fc_s / (cc + fc_s))
-            rows.append({"model": args.model_name, "guidance_scale": guidance_scale, "attribute": attr, "direction": direction, "CC": cc, "FC_success": fc_s, "FC_fail": fc_f, "PCF": pcf, "n": int(valid.sum()), "cohort_n": len(indices), "weight": cache["intervention_weights"][attr][direction], "excess_sum_success": float(excess_s.sum()), "success_n": int(success.sum()), "unmodeled_count": len(unmodeled)})
-            logging.info("result attr=%s direction=%s CC=%.4f FC_success=%.4f FC_fail=%.4f PCF=%.4f n=%d", attr, direction, cc, fc_s, fc_f, pcf, int(valid.sum()))
+            fc_s_raw, fc_s_corr, obs_s, excess_s = fc_for(success)
+            fc_f_raw, fc_f_corr, _, _ = fc_for(fail)
+
+            def _pcf(cc, fc):
+                return 0.0 if cc + fc == 0 else float(2 * cc * fc / (cc + fc))
+
+            pcf_raw = _pcf(cc, fc_s_raw)
+            pcf_corr = _pcf(cc, fc_s_corr)
+            rows.append({
+                "model": args.model_name, "guidance_scale": guidance_scale,
+                "attribute": attr, "direction": direction, "CC": cc,
+                "FC_success_raw": fc_s_raw, "FC_success_corr": fc_s_corr,
+                "FC_fail_raw": fc_f_raw, "FC_fail_corr": fc_f_corr,
+                "PCF_raw": pcf_raw, "PCF_corr": pcf_corr,
+                "n": int(valid.sum()), "cohort_n": len(indices),
+                "weight": cache["intervention_weights"][attr][direction],
+                "raw_flip_sum_success": float(obs_s.sum()),
+                "excess_sum_success": float(excess_s.sum()),
+                "success_n": int(success.sum()), "unmodeled_count": len(unmodeled),
+            })
+            logging.info("attr=%s dir=%s CC=%.4f FC_raw=%.4f FC_corr=%.4f PCF_raw=%.4f PCF_corr=%.4f n=%d",
+                         attr, direction, cc, fc_s_raw, fc_s_corr, pcf_raw, pcf_corr, int(valid.sum()))
 
     if grid_rows:
         save_labeled_grid(grid_rows, grid_labels, out / "pcf_experiments_grid.png", label_width=260)
@@ -330,15 +348,40 @@ def main():
         w.writeheader();
         w.writerows(rows)
     weight_sum = sum(r["weight"] for r in rows) or 1.0
-    macro = float(np.mean([r["PCF"] for r in rows]))
-    weighted = float(sum(r["PCF"] * r["weight"] for r in rows) / weight_sum)
+
+    # macro (unweighted mean of per-intervention PCF), for each variant
+    macro_raw = float(np.mean([r["PCF_raw"] for r in rows]))
+    macro_corr = float(np.mean([r["PCF_corr"] for r in rows]))
+
+    # weighted by SUPPORT (n), not inverse-prevalence
+    w_sum = sum(r["n"] for r in rows) or 1
+    weighted_raw = float(sum(r["PCF_raw"] * r["n"] for r in rows) / w_sum)
+    weighted_corr = float(sum(r["PCF_corr"] * r["n"] for r in rows) / w_sum)
+
+    # micro: pool counts, then harmonic-mean
     global_cc = sum(r["CC"] * r["n"] for r in rows) / (sum(r["n"] for r in rows) or 1)
     total_un = sum(r["success_n"] * r["unmodeled_count"] for r in rows) or 1
-    global_fc = 1.0 - (sum(r["excess_sum_success"] * r["success_n"] for r in rows) / total_un)
-    micro = 0.0 if global_cc + global_fc == 0 else float(2 * global_cc * global_fc / (global_cc + global_fc))
-    points = [(r["CC"], r["FC_success"], f"{r['attribute']} {r['direction']}") for r in rows]
-    area = frontier_area(pareto_frontier(points))
-    agg = {"model": args.model_name, "guidance_scale": guidance_scale, "macro_PCF": macro, "micro_PCF": micro, "weighted_PCF": weighted, "frontier_area": area, "micro_macro_gap": micro - macro}
+    global_fc_raw = 1.0 - (sum(r["raw_flip_sum_success"] * r["success_n"] for r in rows) / total_un)
+    global_fc_corr = 1.0 - (sum(r["excess_sum_success"] * r["success_n"] for r in rows) / total_un)
+    micro_raw = _pcf(global_cc, global_fc_raw)
+    micro_corr = _pcf(global_cc, global_fc_corr)
+
+    # frontiers for each variant
+    def _area(fc_key):
+        pts = [(r["CC"], r[fc_key], f"{r['attribute']} {r['direction']}") for r in rows]
+        return frontier_area(pareto_frontier(pts))
+
+    area_raw = _area("FC_success_raw")
+    area_corr = _area("FC_success_corr")
+
+    agg = {"model": args.model_name, "guidance_scale": guidance_scale,
+           "macro_PCF_raw": macro_raw, "macro_PCF_corr": macro_corr,
+           "micro_PCF_raw": micro_raw, "micro_PCF_corr": micro_corr,
+           "weighted_PCF_raw": weighted_raw, "weighted_PCF_corr": weighted_corr,
+           "frontier_area_raw": area_raw, "frontier_area_corr": area_corr,
+           "micro_macro_gap_raw": micro_raw - macro_raw,
+           "micro_macro_gap_corr": micro_corr - macro_corr}
+
     with open(out / "pcf_aggregate.csv", "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=list(agg.keys()));
         w.writeheader();

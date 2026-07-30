@@ -1,5 +1,5 @@
 # Global cohort settings shared by every HDAE model/config run.
 # Keep this file model-agnostic so all models are evaluated on identical images.
 output: experiments/hdae/outputs/shared_cohorts/celeba_hq_conditioning_cohorts.json
-num_images: 256
+num_images: 1024
 seed: 0

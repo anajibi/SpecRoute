@@ -1,0 +1,154 @@
+## 1. Model-agnostic CF (counterfactual) generation contract
+
+> first I need to make a framework for validation over different models, I need to define a contract for cf image generation so it is compatible with any model because I need extensive evaluation over different models.
+
+Goal: one contract so any model (current per_block_attr HDAE, a future SCM-augmented
+HDAE from item 2, the frozen-DiffAE baseline in archive/diffae_latent_probe/) can be
+scored by the same CC/FC/PCF pipeline and compared apples-to-apples.
+
+Plan:
+- New `CFModelAdapter` interface (e.g. `experiments/hdae/counterfactuals/cf_contract.py`):
+  `load(config, ckpt)`, `attribute_names`/`modeled_attrs`/`attr_input_range` metadata,
+  `encode(images) -> state`, `intervene(state, attr, target) -> state`,
+  `render(state, guidance_scale) -> images`.
+- Extract the HDAE-specific pieces already inlined in `run_pcf_eval.py`
+  (`AttributeCFGWrapper`, `encode_stochastic_with_model`, `render_with_attribute_cfg`,
+  `module.encode`/`make_cond`) into a concrete `HDAEAdapter` implementing that interface.
+- Rewrite `evaluate_intervention()`/`main()` in `run_pcf_eval.py` to depend only on the
+  adapter, not on `HDAELitModule` directly. Select adapter class from a new `model_type:`
+  config field (default `hdae`, backward compatible).
+- `build_cohorts.py` and `cf_aggregate.py` are already model-agnostic (operate on
+  attribute arrays / CSV rows) — no changes needed there.
+- Acceptance test for "is this contract actually generic": port a second, genuinely
+  different model behind it — the frozen pretrained DiffAE path in
+  `archive/diffae_latent_probe/` (single `z_sem`, linear-probe edit direction, no
+  attribute-CFG) is the cheapest real second implementation, not just a refactor of the
+  one model that already runs.
+
+Depends on: nothing — start first. Carry the in-flight PCF raw/corrected split
+(`run_pcf_eval.py`, see experiments/hdae/AGENDA.md §8) through the refactor, don't lose it.
+
+Open decisions (your call):
+- Should `encode` and x_T abduction be one adapter call or two? HDAE currently needs both
+  together (abduction requires the same model instance/cond that produced z).
+- Fold `run_counterfactual_eval.py` / `run_preservation_sweep.py` / `run_swap_eval.py` into
+  the same adapter now (they duplicate per-model logic today), or leave them as-is for now?
+
+
+## 2. Normalizing flows for the causal graph
+
+> Second, I need to finally explicitly add the Normalizing flows for the causal graph to the model. Note that you should pay attention to normalization over dataset, needs for normalizing flow training, being general so it is dataset agnostic and ...
+
+Goal: replace the current editing scheme (flip one attribute's conditioning index,
+independently of the rest) with real structural-causal-model counterfactuals: abduct
+exogenous noise per attribute, intervene on the target, propagate the predicted effect to
+causal descendants via normalizing flows, then condition HDAE on the full resulting
+attribute vector.
+
+Plan:
+- Declare a causal DAG over the conditioning attributes (see open decision below).
+- One flow per attribute node, conditioned on its parents (masked-autoregressive-flow-per-
+  node / "Deep SCM" pattern), fit on the packed attribute table
+  (`data/packed/*_attrs.npz`) — not on images. New module, e.g.
+  `experiments/hdae/causal/scm.py` (fit/sample/abduct/intervene) +
+  `experiments/hdae/causal/normalize.py` (per-attribute normalization).
+- Dataset-agnostic by construction: the flow only needs a labeled attribute table + a
+  declared DAG, so the same code should work on CelebA-HQ, MorphoMNIST, and
+  Causal3DIdent (item 3) without dataset-specific branches beyond the normalization layer.
+- Integration point: in `run_pcf_eval.py::evaluate_intervention` (or its item-1-refactored
+  equivalent), replace the single-attribute `y_cf[:, target_col] = 1/0` flip with:
+  abduct noise from the source image's real attributes -> set the target attribute ->
+  forward through the flow to get counterfactual values for its descendants -> condition
+  HDAE on the whole resulting vector, not just the one flipped entry.
+- New training script `experiments/hdae/causal/train_scm.py`, run once per dataset,
+  independent of and prior to HDAE training/inference.
+
+Depends on: item 1 (cleaner if `intervene()` in the adapter contract can take a full
+attribute vector, not just one flipped index) — do item 1 first, matches your ordering.
+
+Open decisions (your call, not guessing these):
+- The DAG itself (e.g. is `Young` a parent of `Male`? is `Eyeglasses` downstream of
+  `Smiling`?) — a modeling/domain claim, needs your judgment.
+- Flow library — nothing is installed yet (checked venv + requirements, no `nflows`/
+  `zuko`/`FrEIA`/`pyro`). Leaning `nflows` (lightweight, MAF/RealNVP, PyTorch-native)
+  unless you have a preference.
+- CelebA's attributes are binary; a continuous-flow framework needs either a
+  logit-transform of smoothed empirical probability or a discrete/categorical flow
+  variant. Affects item 3's continuous factors differently too — worth deciding once.
+
+
+## 3. Bring in MorphoMNIST and Causal3DIdent datasets
+
+> Third, I need to bring MorphoMnist and Causal3DIdent dataset.
+
+Goal: broaden evaluation past faces, and — more importantly — get datasets with a
+*known* ground-truth causal graph to validate item 2's learned graph against, since
+CelebA has no ground truth to check against.
+
+Plan:
+- Mirror the existing `data/celeba_hq.py` + `data/datamodule.py` +
+  `scripts/preprocess_data.py` pattern: `data/morphomnist.py` and
+  `data/causal3dident.py`, each exposing the same `{"img", "attr"}` batch contract the
+  rest of the pipeline (training, latent probing, `run_pcf_eval.py`) already relies on.
+- Add a `data.dataset_name` config field so `preprocess_data.py`/`datamodule.py` dispatch
+  by dataset instead of being CelebA-HQ-only; add `configs/morphomnist_*.yaml` /
+  `configs/causal3dident_*.yaml` following the `hier_k*.yaml` shape
+  (see experiments/hdae/AGENDA.md §4).
+- Both datasets ship their true causal graph/factor metadata with the images — store that
+  as the declared DAG for item 2's SCM module on these two datasets specifically, which is
+  the actual point of adding them (check whether the learned flow-based graph recovers the
+  known one before trusting it on CelebA).
+
+Depends on: nothing technically, but its main value is validating item 2, so treating it
+as strictly-after-item-2 wastes that value.
+
+Open decision (your call): stand up (at least) the MorphoMNIST loader now, in parallel
+with item 2's SCM design, so the SCM code has a dataset with a known-correct answer to
+test against instead of only CelebA where correctness can't be checked — or keep it
+third as listed. Recommend pulling it earlier; your call on priority.
+
+
+## 4. Decompose CF1 into observed CF1, unobserved CF1, and Aggregated CF1
+
+> Fourthly, you can decompose CF1 to observed CF1 and unobserved CF1, and Aggregated CF1.
+
+Before anything else on this item: confirm which existing metric "CF1" names — the
+codebase has two candidates and they are not the same thing:
+- `PCF` in `run_pcf_eval.py` (2·CC·FC/(CC+FC), an F1-style harmonic mean of
+  counterfactual-consistency and factual-consistency; already has a raw/corrected split
+  in flight, see experiments/hdae/AGENDA.md §8), or
+- `counterfactual_consistency`/`factual_flip_success`/`factual_flip_fail` in the older
+  `run_cf_consistency.py` -> `cf_aggregate.py` path (documented as stale/broken in
+  experiments/hdae/AGENDA.md §6 — `attribute_classifier` import doesn't exist).
+
+My guess is CF1 = PCF ("Counterfactual-F1"), but I'm not building on that guess without
+you confirming it — one wrong assumption here means building the wrong thing.
+
+Plan (assuming CF1 = PCF, pending your confirmation above):
+- `run_pcf_eval.py`'s `FC_corr` already subtracts a *correlational* baseline
+  (`compute_baselines_and_weights`, naive co-occurrence) so attributes merely correlated
+  with the intervened one aren't penalized. This item replaces that correlational
+  baseline with item 2's *causal* one: partition the 36 unmodeled attributes into
+  "observed" (causal descendants of the intervened attribute per the SCM graph — expected
+  to move, scored on whether they moved *as predicted*) and "unobserved" (non-descendants
+  — expected to stay put, scored on whether they didn't move).
+- `observed_CF1` = F1-style combination of CC with a descendant-specific FC (moved in the
+  SCM-predicted direction, not just "moved").
+- `unobserved_CF1` = F1-style combination of CC with FC over non-descendants only (like
+  today's `FC_corr`, but graph-defined instead of correlation-defined).
+- `aggregated_CF1` = the same macro/micro/weighted pattern already implemented for
+  `PCF_raw`/`PCF_corr`, extended across the observed/unobserved split.
+- Lands entirely inside `run_pcf_eval.py` (or its post-item-1 adapter equivalent) — no new
+  files, mostly extends the existing `fc_for()`/aggregation logic.
+
+Depends on: item 2 — hard dependency, needs a causal graph to define "observed" vs
+"unobserved" descendants. Must come after.
+
+
+## 5. CheXpert dataset — future, not planned yet
+
+> Lastly, the CheXpert dataset should also be included.
+
+Parked per instruction. Revisit after 1-4 land; CheXpert (chest X-rays, multi-label,
+different modality entirely) will likely need its own data-loading and normalization
+work beyond what items 1-3 set up for faces/MorphoMNIST/Causal3DIdent.
