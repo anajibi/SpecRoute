@@ -2,3 +2,4 @@
 PyYAML
 lmdb
 Pillow
+nflows  # experiments/hdae/causal/ SCM (TODO item 2)

@@ -1,0 +1,17 @@
+# Frozen, pretrained DiffAE + linear-probe attribute directions.
+# Second CFModelAdapter implementation (TODO item 1 acceptance test): a
+# genuinely different model behind the same encode/intervene/render contract
+# as HDAE -- single z_sem, no hierarchy, no attribute conditioning/CFG.
+#
+# Resolution note: the shared CelebA-HQ packed pipeline (dataset + attr
+# classifier) is 64x64; the only real frozen DiffAE checkpoint available
+# locally is ffhq256_autoenc (256x256, FFHQ). The adapter resizes 64->256 on
+# encode and back to 64 on render so CC/FC scoring stays on identical images
+# across adapters -- see diffae_adapter.py docstring.
+template: ffhq256_autoenc
+native_image_size: 256
+directions_path: experiments/hdae/outputs/diffae_probe/directions.pt
+modeled_attrs: [Smiling, Eyeglasses, Male, Young]
+edit_alpha: 1.0
+reverse_steps: 250
+render_steps: 20

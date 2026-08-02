@@ -1,0 +1,26 @@
+# Causal DAG over the CelebA conditioning attributes (TODO item 2).
+# Shared, model-agnostic config -- mirrors cohorts.yaml, not per-model-config.
+#
+# edges: [] means fully independent (your explicit choice, 2026-07-31) --
+# the SCM below is still fit and wired into run_cf1_eval.py for real (not a
+# stub), but with no edges every node's descendant set is empty, so
+# CC-with-descendants and observed-FC currently reduce to their pre-item-2
+# single-attribute behavior. Add [parent, child] pairs here to activate
+# propagation; see experiments/hdae/causal/verify_scm.py for a worked
+# non-empty example (Male -> Young -> Smiling) proving the propagation path
+# is correct before you rely on it for real edges.
+#
+# IMPORTANT: after editing edges or logit_smoothing_eps, re-run
+# `causal/train_scm.py` before the next run_cf1_eval.py -- the fitted SCM
+# checkpoint bakes in its OWN attributes/edges/eps, and run_cf1_eval.py
+# refuses to run (raises) if this file and the checkpoint disagree, rather
+# than silently mixing a stale checkpoint topology with a new declared graph.
+attributes: [Smiling, Eyeglasses, Male, Young]
+edges: []
+
+# Logit-of-smoothed-probability transform applied to each binary attribute
+# before fitting/abducting through its flow: p = y*(1-2*eps) + eps. Resolves
+# TODO item 2's "CelebA attributes are binary" open decision.
+logit_smoothing_eps: 0.05
+
+scm_checkpoint: experiments/hdae/outputs/scm/celeba_scm.pt

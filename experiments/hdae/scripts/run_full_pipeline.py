@@ -45,13 +45,17 @@ def main():
     p.add_argument("--num-cf-images", type=int, default=64)
     p.add_argument("--cohort-config", default="experiments/hdae/configs/cohorts.yaml",
                    help="Global, model-agnostic cohort settings shared across all model configs.")
-    p.add_argument("--pcf-guidance-scale", type=float, default=5.0,
-                   help="Experimental attribute-CFG scale passed to PCF rendering; 1.0 disables guidance blending.")
-    p.add_argument("--skip-pcf", action="store_true")
+    p.add_argument("--cf1-edit-strength", type=float, default=5.0,
+                   help="HDAE attribute-CFG guidance scale passed to CF1 rendering; 1.0 disables guidance blending.")
+    p.add_argument("--causal-graph", default="experiments/hdae/configs/causal_graph.yaml",
+                   help="Shared causal-DAG config (TODO item 2), fit into an SCM before CF1 eval.")
+    p.add_argument("--skip-cf1", action="store_true")
     args = p.parse_args()
     import yaml
     raw = yaml.safe_load(open(args.config))
     cohort_raw = yaml.safe_load(open(args.cohort_config))
+    causal_raw = yaml.safe_load(open(args.causal_graph))
+    scm_ckpt = Path(causal_raw["scm_checkpoint"])
     data = raw["data"]
     out = Path(args.output_dir or raw["output_dir"])
     lmdb_meta = Path(data["lmdb_path"]) / "meta.json"
@@ -72,10 +76,10 @@ def main():
         raise ValueError("No modeled attributes found; set encoder.conditioning_attrs in the model config.")
     cohorts = Path(cohort_raw["output"])
     cohort_weights = cohorts.with_name(cohorts.stem + "_intervention_weights.csv")
-    pcf_out = out / "counterfactuals" / "pcf"
-    pcf_per_intervention = pcf_out / "pcf_per_intervention.csv"
-    pcf_aggregate = pcf_out / "pcf_aggregate.csv"
-    pcf_grid = pcf_out / "pcf_experiments_grid.png"
+    cf1_out = out / "counterfactuals" / "cf1"
+    cf1_per_intervention = cf1_out / "cf1_per_intervention.csv"
+    cf1_aggregate = cf1_out / "cf1_aggregate.csv"
+    cf1_grid = cf1_out / "cf1_experiments_grid.png"
     model_name = raw.get("model_name") or raw.get("name") or Path(raw["output_dir"]).name
     safe_model_name = "".join(ch if ch.isalnum() or ch in "._-" else "_" for ch in model_name)
     ckpt = Path(args.ckpt) if args.ckpt else out / "checkpoints" / "last.ckpt"
@@ -109,20 +113,22 @@ def main():
     #     outputs=[attr_ckpt], force=args.force, skip=args.skip_attr_classifier and attr_ckpt.exists(), reason="requested and checkpoint exists")
     run([py, "experiments/hdae/build_cohorts.py", "--attr-npz", str(attr_npz), "--attributes", modeled_attrs,
          "--num-images", str(cohort_raw["num_images"]), "--seed", str(cohort_raw["seed"]), "--output", str(cohorts)],
-        outputs=[cohorts, cohort_weights], force=args.force, skip=args.skip_pcf, reason="PCF skipped")
+        outputs=[cohorts, cohort_weights], force=args.force, skip=args.skip_cf1, reason="CF1 skipped")
+    run([py, "experiments/hdae/causal/train_scm.py", "--causal-graph", args.causal_graph, "--attr-npz", str(attr_npz)],
+        outputs=[scm_ckpt], force=args.force, skip=args.skip_cf1, reason="CF1 skipped")
     run([py, "experiments/hdae/counterfactuals/run_counterfactual_eval.py", "--config", args.config, "--ckpt",
          str(ckpt),
          "--attr-classifier", str(attr_ckpt), "--attribute", args.attribute,
          "--num-images", str(args.num_cf_images), "--output-dir", str(cf_out)],
         outputs=[cf_summary], force=args.force)
-    run([py, "experiments/hdae/counterfactuals/run_pcf_eval.py", "--config", args.config, "--ckpt", str(ckpt),
-         "--attr-classifier", str(attr_ckpt), "--cohorts", str(cohorts), "--output-dir", str(pcf_out),
-         "--model-name", model_name, "--baseline-cache", str(pcf_out / "correlation_baseline.json"),
-         "--guidance-scale", str(args.pcf_guidance_scale)],
-        outputs=[pcf_per_intervention, pcf_aggregate, pcf_grid, pcf_out / f"frontier_{safe_model_name}.png"],
-        force=True, skip=args.skip_pcf, reason="PCF skipped")
+    run([py, "experiments/hdae/counterfactuals/run_cf1_eval.py", "--model-type", "hdae", "--config", args.config,
+         "--ckpt", str(ckpt), "--attr-classifier", str(attr_ckpt), "--cohorts", str(cohorts),
+         "--lmdb-path", str(data["lmdb_path"]), "--causal-graph", args.causal_graph,
+         "--output-dir", str(cf1_out), "--model-name", model_name, "--edit-strength", str(args.cf1_edit_strength)],
+        outputs=[cf1_per_intervention, cf1_aggregate, cf1_grid, cf1_out / f"frontier_{safe_model_name}.png"],
+        force=True, skip=args.skip_cf1, reason="CF1 skipped")
     logging.info("Pipeline complete. Outputs are under %s", out)
-    logging.info("PCF outputs: per-intervention=%s aggregate=%s cohort-weights=%s", pcf_per_intervention, pcf_aggregate,
+    logging.info("CF1 outputs: per-intervention=%s aggregate=%s cohort-weights=%s", cf1_per_intervention, cf1_aggregate,
                  cohort_weights)
 
 

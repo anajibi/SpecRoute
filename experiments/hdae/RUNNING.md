@@ -41,31 +41,28 @@ hardcoded in `hdae/config_io.py`; update it if the repo ever moves.
 ```bash
 python experiments/hdae/scripts/run_full_pipeline.py \
   --config experiments/hdae/configs/hier_k5.yaml \
-  --attribute Smiling --pcf-guidance-scale 8.0
+  --attribute Smiling --cf1-edit-strength 8.0
 ```
 
 Runs, in order, skipping any stage whose declared outputs already exist
 (`--force` to redo a stage): preprocess -> train -> reconstruct -> extract
 latents -> train linear probes -> analyze probes -> swap/null grid -> abduct
-grid -> build cohorts -> counterfactual eval -> PCF eval. Swap `hier_k5.yaml`
+grid -> build cohorts -> counterfactual eval -> CF1 eval. Swap `hier_k5.yaml`
 for `hier_k1.yaml` / `hier_k11.yaml` for the other trained hierarchy sizes
 (K = 1 / 5 / 11 levels). **Do not use `celeba64_*.yaml` configs — they no
 longer load with the current code, see `AGENDA.md` §4.**
 
-**The PCF stage always re-runs** (`run_full_pipeline.py` passes `force=True`
+**The CF1 stage always re-runs** (`run_full_pipeline.py` passes `force=True`
 for it specifically) — re-invoking this on `hier_k5`/`hier_k11` overwrites
-`pcf_per_intervention.csv`/`pcf_aggregate.csv` and will currently crash
-before finishing (see §3, the `FC_success` `KeyError`). Fix
-`save_frontier_plot()` first, or expect a non-zero exit after the CSVs are
-already (over)written.
+`cf1_per_intervention.csv`/`cf1_aggregate.csv`.
 
 ## 3. Current trained checkpoints (this machine, as of 2026-07-30)
 
 | Config | Checkpoint | Status |
 |---|---|---|
-| `hier_k1.yaml` (K=1, flat) | `experiments/hdae/outputs/hier_k1/checkpoints/last.ckpt` | trained; reconstruction/latent-probing/PCF outputs complete |
-| `hier_k5.yaml` (K=5) | `experiments/hdae/outputs/hier_k5/checkpoints/last.ckpt` | trained; last PCF run 2026-07-16 via `playground.bash` (`run_k5.log`) — `pcf_aggregate.csv`/`pcf_per_intervention.csv` written, then crashed in `save_frontier_plot()`: `KeyError: 'FC_success'` (stale key from the raw/corrected refactor, see AGENDA.md §8). Not currently running (nothing in `ps aux`). |
-| `hier_k11.yaml` (K=11) | `experiments/hdae/outputs/hier_k11/checkpoints/last.ckpt` | trained; same 2026-07-16 run/crash, `run_k11.log`. |
+| `hier_k1.yaml` (K=1, flat) | `experiments/hdae/outputs/hier_k1/checkpoints/last.ckpt` | trained; reconstruction/latent-probing/PCF (now CF1) outputs complete |
+| `hier_k5.yaml` (K=5) | `experiments/hdae/outputs/hier_k5/checkpoints/last.ckpt` | trained; last full run 2026-07-16 via `playground.bash` (`run_k5.log`) under the old `run_pcf_eval.py`, which crashed in `save_frontier_plot()` (`KeyError: 'FC_success'`) after writing valid CSVs. That script was replaced 2026-07-31 by the model-agnostic `run_cf1_eval.py` + `CFModelAdapter` contract (TODO item 1), which fixes the crash (regression-checked bit-identical against the old `pcf_aggregate.csv` math) and renames the metric PCF -> CF1; see AGENDA.md §8. Not currently running (nothing in `ps aux`). |
+| `hier_k11.yaml` (K=11) | `experiments/hdae/outputs/hier_k11/checkpoints/last.ckpt` | trained; same 2026-07-16 run/crash, `run_k11.log`; same fix applies. |
 
 `checkpoints/celeba64d2c_autoenc/` at the repo root (gitignored) is an unrelated upstream
 pretrained-DiffAE demo download (sample grids only, no weights) — not used by
@@ -147,7 +144,25 @@ python experiments/hdae/latent_probing/abduct_xt_z_grid.py \
 ```
 Both work for any configured K.
 
-### Counterfactual / PCF evaluation
+### Counterfactual / CF1 evaluation (model-agnostic, `CFModelAdapter` contract)
+
+`run_cf1_eval.py` (formerly `run_pcf_eval.py`; the metric was renamed PCF ->
+CF1) no longer talks to HDAE directly — it drives whatever model is
+registered under `--model-type` via `cf_contract.py`'s
+`encode`/`intervene`/`render` interface, so the exact same script scores any
+number of different architectures on identical images. Two adapters exist:
+
+- `hdae` (`hdae_adapter.py`) — the trained per_block_attr HDAE, attribute-CFG
+  guidance. `--edit-strength` is the CFG guidance scale.
+- `diffae_probe` (`diffae_adapter.py`) — a frozen, pretrained DiffAE
+  (`ffhq256_autoenc`, the only real frozen checkpoint available locally;
+  `celeba64d2c_autoenc` at repo root has no weights, only sample PNGs — see
+  §3) edited via `z_sem + alpha * w` linear-probe directions. `--edit-strength`
+  is alpha. Resizes 64<->256 internally to stay on the same images as HDAE
+  (see `diffae_adapter.py` docstring) — this is the item 1 acceptance test
+  (a genuinely different model behind the same contract), not a quality
+  benchmark: FFHQ-trained, cross-resolution, so edit fidelity is expected to
+  be worse than HDAE's.
 
 ```bash
 # model-agnostic fixed image cohorts (pos/neg per attribute) so every model is scored
@@ -158,26 +173,53 @@ python experiments/hdae/build_cohorts.py \
   --num-images 1024 --seed 0 \
   --output experiments/hdae/outputs/shared_cohorts/celeba_hq_conditioning_cohorts.json
 
-# CC / FC / PCF eval (raw + prevalence-corrected variants, see AGENDA.md §8-9 for metric definitions)
-python experiments/hdae/counterfactuals/run_pcf_eval.py \
+# fit the causal SCM (TODO item 2) — edges declared in causal_graph.yaml (currently
+# empty; add [parent, child] pairs there to activate propagation, no code changes needed).
+# Re-run this any time edges or logit_smoothing_eps change: run_cf1_eval.py checks the
+# checkpoint's baked-in graph/eps against the YAML and raises if they disagree, rather
+# than silently propagating through a stale topology.
+python experiments/hdae/causal/train_scm.py \
+  --causal-graph experiments/hdae/configs/causal_graph.yaml \
+  --attr-npz experiments/hdae/data/packed/celebahq_64_attrs.npz
+
+# CC / FC / CF1 eval (observed vs unobserved FC pools, see AGENDA.md §9-10 for metric
+# definitions) — always loads the fitted SCM to build the full counterfactual attribute
+# vector, even with today's edgeless graph (a verified no-op vs. the single-attribute flip)
+python experiments/hdae/counterfactuals/run_cf1_eval.py \
+  --model-type hdae \
   --config experiments/hdae/configs/hier_k5.yaml --ckpt <ckpt> \
   --attr-classifier experiments/hdae/outputs/finetuned_attr_classifier.pt \
   --cohorts experiments/hdae/outputs/shared_cohorts/celeba_hq_conditioning_cohorts.json \
-  --output-dir experiments/hdae/outputs/hier_k5/counterfactuals/pcf \
-  --model-name hier_k5 --guidance-scale 8.0
+  --lmdb-path experiments/hdae/data/packed/celebahq_64.lmdb \
+  --causal-graph experiments/hdae/configs/causal_graph.yaml \
+  --output-dir experiments/hdae/outputs/hier_k5/counterfactuals/cf1 \
+  --model-name hier_k5 --edit-strength 8.0
 ```
-Writes `pcf_per_intervention.csv`, `pcf_aggregate.csv` (macro/micro/weighted x
-raw/corrected `PCF`), `pcf_experiments_grid.png`, `correlation_baseline.json`
-(cached natural co-occurrence baseline, reused across guidance-scale sweeps
-unless `--baseline-cache` points elsewhere).
+Writes `cf1_per_intervention.csv`, `cf1_aggregate.csv` (macro/micro/weighted x
+`CF1_observed`/`CF1_unobserved`), `cf1_experiments_grid.png`. `--max-images`
+caps the cohort size per (attribute, direction) for fast smoke tests.
+Before trusting the SCM with real (non-empty) graph edges, run
+`python experiments/hdae/causal/verify_scm.py` — it fits a toy non-empty
+chain and checks round-trip identity, correct propagation, and non-descendant
+isolation; see AGENDA.md §10.
 
-**Known-broken right now:** `save_frontier_plot()` in this file still reads
-`r["FC_success"]`, a key the raw/corrected refactor renamed to
-`FC_success_raw`/`FC_success_corr`. The two CSVs above are written first and
-are valid; the frontier PNG and the process exit code are not — confirmed by
-the 2026-07-16 crash in `run_k5.log`/`run_k11.log` (§3). Fix the key
-reference (pick `_raw` or `_corr`, or plot both) before trusting this path
-end-to-end.
+To score the frozen-DiffAE baseline instead, first fit its probe directions
+against the same packed data (writes `directions.pt`, one-time per checkpoint):
+```bash
+python experiments/hdae/counterfactuals/train_diffae_directions.py \
+  --config experiments/hdae/configs/diffae_probe.yaml \
+  --ckpt diffae_upstream/checkpoints/ffhq256_autoenc/last.ckpt \
+  --lmdb-path experiments/hdae/data/packed/celebahq_64.lmdb \
+  --attr-npz experiments/hdae/data/packed/celebahq_64_attrs.npz \
+  --num-images 2000
+```
+then run `run_cf1_eval.py --model-type diffae_probe --config
+experiments/hdae/configs/diffae_probe.yaml --ckpt
+diffae_upstream/checkpoints/ffhq256_autoenc/last.ckpt` with the same
+`--cohorts`/`--lmdb-path`/`--attr-classifier` as above — the aggregate CSVs
+land in the same schema (`model_type`/`edit_strength` columns replace the old
+HDAE-only `guidance_scale` column) so `hier_k5` and `diffae_probe` rows are
+directly comparable.
 
 **Known-broken, don't run:** `run_cf_consistency.py` and
 `diagnose_xt_dominance.py` both `import
@@ -210,7 +252,7 @@ fix the import or delete before trusting either script.
 | `conditioning.style_ch` | Decoder semantic conditioning width. |
 | `conditioning.latent_drop_prob` | Per-sample, per-level probability of substituting the learned null token during training. |
 | `conditioning.cfg_drop_prob` | Per-sample probability of dropping all modeled attributes to the null attribute token, for classifier-free guidance training. |
-| `conditioning.cfg_guidance_scale` | Default attribute-CFG inference scale used by PCF eval when no `--guidance-scale` CLI override is given. |
+| `conditioning.cfg_guidance_scale` | Default attribute-CFG inference scale used by `HDAEAdapter`/CF1 eval when no `--edit-strength` CLI override is given. |
 | `train.batch_size_per_gpu`, `total_batch_size` | Local/global batch (global must equal local x devices). |
 | `train.lr`, `ema_decay`, `T`, `T_eval` | LR, EMA decay, train diffusion steps, DDIM eval steps. |
 | `train.max_steps`, `precision`, `grad_clip`, `num_workers` | Trainer/runtime settings. |
