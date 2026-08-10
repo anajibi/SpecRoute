@@ -33,15 +33,18 @@ sys.path.insert(0, str(ROOT))
 import numpy as np
 from torchvision.datasets import MNIST
 
-from experiments.hdae.data.morphomnist import Factors, MorphoMNISTPacked, pad_to_32, render, sample_targets
+from experiments.hdae.data.morphomnist import (DEFAULT_FACTOR_CONFIG_PATH, Factors, MorphoMNISTPacked,
+                                               load_factor_config, pad_digit, render, sample_targets)
 
 logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(message)s")
 
-PACKED_PATH = "experiments/hdae/data/packed/morphomnist_32.npz"
+PACKED_PATH = "experiments/hdae/data/packed/morphomnist.h5"
 MNIST_RAW_DIR = "experiments/hdae/data/raw/mnist"
 
 
 def main():
+    config = load_factor_config(DEFAULT_FACTOR_CONFIG_PATH)
+    pad = config["image"]["pad"]
     ds = MorphoMNISTPacked(PACKED_PATH)
     n = len(ds)
     logging.info("loaded %s: n=%d attribute_names=%s", PACKED_PATH, n, ds.attribute_names)
@@ -55,13 +58,14 @@ def main():
     for idx in train_indices:
         idx = int(idx)
         img28, digit = mnist[idx]
-        img32 = pad_to_32(np.array(img28, dtype=np.uint8))
-        factors = Factors(**sample_targets(idx, int(digit)))
-        rgb_a, _ = render(img32, factors)
-        rgb_b, _ = render(img32, factors)
+        img_padded = pad_digit(np.array(img28, dtype=np.uint8), pad)
+        factors = Factors(**sample_targets(idx, int(digit), config))
+        rgb_a, _ = render(img_padded, factors, config)
+        rgb_b, _ = render(img_padded, factors, config)
         if not np.array_equal(rgb_a, rgb_b):
             mismatches += 1
-        if not np.array_equal(rgb_a, ds.images[idx]):
+        packed_rgb = ((ds[idx]["img"].permute(1, 2, 0).numpy() + 1) * 127.5).round().clip(0, 255).astype(np.uint8)
+        if not np.array_equal(rgb_a, packed_rgb):
             mismatches += 1
     assert mismatches == 0, f"{mismatches} determinism mismatches -- render() is not a pure function of its inputs"
     logging.info("PASS: render() is deterministic and matches the packed dataset exactly (%d images checked)",
@@ -78,11 +82,11 @@ def main():
     # 3. hue independence: changing hue leaves the digit's spatial footprint untouched.
     idx = int(train_indices[0])
     img28, digit = mnist[idx]
-    img32 = pad_to_32(np.array(img28, dtype=np.uint8))
-    factors = Factors(**sample_targets(idx, int(digit)))
-    rgb_a, _ = render(img32, factors)
+    img_padded = pad_digit(np.array(img28, dtype=np.uint8), pad)
+    factors = Factors(**sample_targets(idx, int(digit), config))
+    rgb_a, _ = render(img_padded, factors, config)
     factors_hue2 = Factors(**{**factors.__dict__, "hue": (factors.hue + 0.5) % 1.0})
-    rgb_b, _ = render(img32, factors_hue2)
+    rgb_b, _ = render(img_padded, factors_hue2, config)
     footprint_a = rgb_a.max(axis=-1) > 20
     footprint_b = rgb_b.max(axis=-1) > 20
     mismatch_frac = float((footprint_a != footprint_b).mean())

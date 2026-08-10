@@ -27,12 +27,13 @@ sys.path.insert(0, str(ROOT))
 import numpy as np
 import torch
 
+from experiments.hdae.causal.attr_io import load_attr_table
 from experiments.hdae.causal.scm import SCM
 
 logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(message)s")
 
 SCM_CKPT = "experiments/hdae/outputs/scm/morpho_scm.pt"
-ATTR_NPZ = "experiments/hdae/data/packed/morphomnist_32.npz"
+ATTR_TABLE = "experiments/hdae/data/packed/morphomnist.h5"
 
 
 def main():
@@ -42,10 +43,9 @@ def main():
     logging.info("loaded SCM: attributes=%s edges=%s kinds=%s", graph.attributes, graph.edges,
                  {n: s.kind for n, s in scm.specs.items()})
 
-    arrays = np.load(ATTR_NPZ, allow_pickle=True)
-    attr_names = [str(x) for x in arrays["attribute_names"]]
+    raw_attrs, attr_names, _ = load_attr_table(ATTR_TABLE)
     cols = [attr_names.index(a) for a in graph.attributes]
-    attrs = torch.from_numpy(arrays["attrs"][:512, cols].astype(np.float32)).to(device)
+    attrs = torch.from_numpy(raw_attrs[:512, cols].astype(np.float32)).to(device)
     attr_index = {name: i for i, name in enumerate(graph.attributes)}
 
     # 1. Round-trip identity, all four nodes including categorical `digit`.

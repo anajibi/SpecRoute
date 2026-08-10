@@ -26,6 +26,7 @@ import numpy as np
 import torch
 import yaml
 
+from experiments.hdae.causal.attr_io import load_attr_table
 from experiments.hdae.causal.graph import CausalGraph
 from experiments.hdae.causal.scm import SCM, node_specs_from_config
 
@@ -35,7 +36,7 @@ logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(m
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--causal-graph", default="experiments/hdae/configs/causal_graph.yaml")
-    p.add_argument("--attr-npz", required=True)
+    p.add_argument("--attr-npz", required=True, help="path to a .npz (CelebA-HQ) or .h5/.hdf5 (MorphoMNIST++) attribute table")
     p.add_argument("--epochs", type=int, default=200)
     p.add_argument("--lr", type=float, default=1e-2)
     p.add_argument("--batch-size", type=int, default=4096)
@@ -49,10 +50,9 @@ def main():
     output = Path(args.output or raw["scm_checkpoint"])
     output.parent.mkdir(parents=True, exist_ok=True)
 
-    arrays = np.load(args.attr_npz, allow_pickle=True)
-    attr_names = [str(x) for x in arrays["attribute_names"]]
+    raw_attrs, attr_names, _ = load_attr_table(args.attr_npz)
     cols = [attr_names.index(a) for a in graph.attributes]
-    attrs_matrix = arrays["attrs"][:, cols].astype(np.float32)
+    attrs_matrix = raw_attrs[:, cols].astype(np.float32)
     for j, node in enumerate(graph.attributes):
         if node_specs[node].kind == "binary":
             attrs_matrix[:, j] = (attrs_matrix[:, j] > 0).astype(np.float32)

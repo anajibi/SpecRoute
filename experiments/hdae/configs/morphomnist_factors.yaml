@@ -1,0 +1,67 @@
+# Per-attribute sampling config for MorphoMNIST++ generation.
+# Read by experiments/hdae/data/morphomnist.py (sample_targets/render) via
+# scripts/preview_morphomnist.py (grid preview, no full build) and
+# scripts/build_morphomnist.py (writes the full packed dataset).
+#
+# Edit ranges/distributions here, then re-run preview_morphomnist.py and look
+# at the grid before touching build_morphomnist.py -- there is no automated
+# check for "do the images still look like digits", only your eyes.
+
+image:
+  digit_size: 28   # raw MNIST digit size, fixed by the source data
+  pad: 18           # per side; canvas_size = digit_size + 2*pad
+  canvas_size: 64   # must equal digit_size + 2*pad -- checked at load time, not just documentation
+
+# distribution: uniform {low, high} | normal {mean, std} | loguniform {low, high} | constant {value}
+factors:
+  # --- modeled (SCM nodes: causal_graph_morpho.yaml) ---
+  thickness:
+    distribution: uniform
+    params: {low: 1.2, high: 4.0}          # px, average stroke half-width * 2 (unaffected by canvas size)
+  intensity_base:
+    distribution: uniform
+    params: {low: 140.0, high: 220.0}      # 0-255 mean foreground gray level before the thickness effect
+  intensity_noise:
+    distribution: normal
+    params: {mean: 0.0, std: 5.0}
+  hue:
+    distribution: uniform
+    params: {low: 0.0, high: 1.0}
+
+  # --- injected, unobserved (logged, outside the causal graph) ---
+  # Ranges widened from the 32x32 canvas's originals now that there's real margin (previously
+  # 2px padding around a 28px digit left almost no room; 18px padding on a 64px canvas does).
+  slant:
+    distribution: uniform
+    params: {low: -30.0, high: 30.0}       # degrees, shear
+  rotation:
+    distribution: uniform
+    params: {low: -35.0, high: 35.0}       # degrees
+  scale:
+    distribution: uniform
+    params: {low: 0.7, high: 1.4}
+  translate_x:
+    distribution: uniform
+    params: {low: -10.0, high: 10.0}       # px
+  translate_y:
+    distribution: uniform
+    params: {low: -10.0, high: 10.0}       # px
+  bg_freq:
+    distribution: uniform
+    params: {low: 1.0, high: 4.0}          # cycles across the canvas
+  bg_phase:
+    distribution: uniform
+    params: {low: 0.0, high: 6.283185307179586}   # 2*pi
+  bg_amplitude:
+    distribution: uniform
+    params: {low: 0.0, high: 18.0}         # 0-255 scale of the additive background field
+  texture_amplitude:
+    distribution: uniform
+    params: {low: 0.0, high: 10.0}         # 0-255 scale of additive per-pixel noise
+  # texture_seed is a per-image random integer (the noise pattern's seed), not a physical
+  # quantity with a meaningful distribution -- sampled directly, not through this table.
+
+# Fixed causal-strength coefficient for thickness -> intensity (not a per-image distribution --
+# a single number shared by every image, like causal_graph.yaml's logit_smoothing_eps).
+# intensity_target = intensity_base - intensity_thickness_gain * achieved_thickness + intensity_noise
+intensity_thickness_gain: 22.0
