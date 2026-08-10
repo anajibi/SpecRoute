@@ -143,9 +143,16 @@ class AugmentedDataset(Dataset):
 
 class SmallCNN(nn.Module):
     """One self-contained backbone+head network, sized for small (~64px) images. Every AttrSpec
-    gets its own instance of this class -- no parameters are shared across attributes."""
+    gets its own instance of this class -- no parameters are shared across attributes.
 
-    def __init__(self, in_channels: int = 3, output_dim: int = 1, base_channels: int = 32):
+    ``dropout`` sits between pooled features and the head's first linear layer. It matters more
+    than it looks: every attribute trained under this template overfits hard (train MSE reaches
+    ~1e-4-5e-3 while val MSE plateaus 10-1000x higher and *stays flat*, i.e. more capacity isn't
+    the bottleneck) -- dropout plus the optimizer's weight decay (see
+    ``AttrRegressionModule``) target that gap directly instead of changing model size."""
+
+    def __init__(self, in_channels: int = 3, output_dim: int = 1, base_channels: int = 32,
+                dropout: float = 0.0):
         super().__init__()
         c = base_channels
         self.conv = nn.Sequential(
@@ -156,8 +163,8 @@ class SmallCNN(nn.Module):
         )
         self.pool = nn.AdaptiveAvgPool2d(1)
         self.head = nn.Sequential(
-            nn.Linear(c * 8, c * 4), nn.SiLU(),
-            nn.Linear(c * 4, output_dim),
+            nn.Dropout(dropout), nn.Linear(c * 8, c * 4), nn.SiLU(),
+            nn.Dropout(dropout), nn.Linear(c * 4, output_dim),
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -170,13 +177,17 @@ class AttrRegressionModule(pl.LightningModule):
     `attr` vector (see `attribute_names`) to pull the target for this specific attribute."""
 
     def __init__(self, spec: AttrSpec, attr_col: int, in_channels: int = 3, base_channels: int = 32,
-                lr: float = 1e-3):
+                lr: float = 1e-3, weight_decay: float = 0.0, dropout: float = 0.0,
+                lr_plateau_patience: int = 0):
         super().__init__()
         self.save_hyperparameters(ignore=[])
         self.spec = spec
         self.attr_col = attr_col
-        self.model = SmallCNN(in_channels=in_channels, output_dim=spec.output_dim, base_channels=base_channels)
+        self.model = SmallCNN(in_channels=in_channels, output_dim=spec.output_dim, base_channels=base_channels,
+                              dropout=dropout)
         self.lr = lr
+        self.weight_decay = weight_decay
+        self.lr_plateau_patience = lr_plateau_patience
 
     def _step(self, batch):
         raw_target = batch["attr"][:, self.attr_col].float()
@@ -203,7 +214,12 @@ class AttrRegressionModule(pl.LightningModule):
         return loss
 
     def configure_optimizers(self):
-        return torch.optim.Adam(self.parameters(), lr=self.lr)
+        opt = torch.optim.AdamW(self.parameters(), lr=self.lr, weight_decay=self.weight_decay)
+        if self.lr_plateau_patience <= 0:
+            return opt
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(opt, mode="min", factor=0.5,
+                                                                patience=self.lr_plateau_patience)
+        return {"optimizer": opt, "lr_scheduler": {"scheduler": scheduler, "monitor": "val_loss"}}
 
     @torch.no_grad()
     def predict_raw(self, img: torch.Tensor) -> torch.Tensor:
@@ -215,6 +231,8 @@ class AttrRegressionModule(pl.LightningModule):
 
 def train_attr_predictor(spec: AttrSpec, attr_col: int, train_dataset: Dataset, val_dataset: Dataset,
                          output_dir: str, in_channels: int = 3, base_channels: int = 32, lr: float = 1e-3,
+                         weight_decay: float = 0.0, dropout: float = 0.0, lr_plateau_patience: int = 0,
+                         augment: "AugmentConfig | None" = None,
                          batch_size: int = 256, max_epochs: int = 100, patience: int = 8,
                          num_workers: int = 4, accelerator: str = "auto") -> str:
     """Trains one independent AttrRegressionModule and returns its best checkpoint path.
@@ -222,16 +240,25 @@ def train_attr_predictor(spec: AttrSpec, attr_col: int, train_dataset: Dataset, 
     `val_dataset` drives both early stopping and checkpoint selection -- callers are responsible
     for keeping it disjoint from any data used for final evaluation (this function has no
     knowledge of a held-out test split; that's the caller's split to protect).
+
+    `weight_decay`/`dropout`/`lr_plateau_patience` exist because every attribute trained under
+    this template overfits (train loss reaches ~1e-4-5e-3 while val loss plateaus far higher and
+    flat) -- these three are what actually address that, not more capacity. `augment`, if given,
+    wraps `train_dataset` only (never `val_dataset` -- validation must see undistorted images).
     """
     from pytorch_lightning.callbacks import EarlyStopping, ModelCheckpoint
     from torch.utils.data import DataLoader
 
+    if augment is not None:
+        train_dataset = AugmentedDataset(train_dataset, augment)
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True,
                               num_workers=num_workers, drop_last=True, persistent_workers=num_workers > 0)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False,
                             num_workers=num_workers, persistent_workers=num_workers > 0)
 
-    module = AttrRegressionModule(spec, attr_col, in_channels=in_channels, base_channels=base_channels, lr=lr)
+    module = AttrRegressionModule(spec, attr_col, in_channels=in_channels, base_channels=base_channels, lr=lr,
+                                  weight_decay=weight_decay, dropout=dropout,
+                                  lr_plateau_patience=lr_plateau_patience)
     ckpt_dir = Path(output_dir) / spec.name
     ckpt_dir.mkdir(parents=True, exist_ok=True)
     checkpoint_cb = ModelCheckpoint(dirpath=str(ckpt_dir), filename="best", monitor="val_loss", mode="min",
@@ -248,11 +275,14 @@ def train_attr_predictor(spec: AttrSpec, attr_col: int, train_dataset: Dataset, 
     return checkpoint_cb.best_model_path
 
 
-def load_attr_predictor(checkpoint_path: str, attr_col: int, in_channels: int = 3,
-                        base_channels: int = 32) -> AttrRegressionModule:
+def load_attr_predictor(checkpoint_path: str, attr_col: int) -> AttrRegressionModule:
+    """`in_channels`/`base_channels`/`dropout`/etc are deliberately NOT passed here -- they're
+    restored from the checkpoint's own saved hyperparameters (`save_hyperparameters` in
+    `AttrRegressionModule.__init__`), so a checkpoint trained with a non-default architecture
+    (e.g. a wider `base_channels` for a harder attribute) loads correctly without the caller
+    needing to know or track what architecture each individual checkpoint used."""
     spec_path = Path(checkpoint_path).parent / "spec.json"
     spec = AttrSpec(**json.loads(spec_path.read_text()))
-    module = AttrRegressionModule.load_from_checkpoint(checkpoint_path, spec=spec, attr_col=attr_col,
-                                                        in_channels=in_channels, base_channels=base_channels)
+    module = AttrRegressionModule.load_from_checkpoint(checkpoint_path, spec=spec, attr_col=attr_col)
     module.eval()
     return module

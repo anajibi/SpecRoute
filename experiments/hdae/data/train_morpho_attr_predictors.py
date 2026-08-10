@@ -28,7 +28,7 @@ import numpy as np
 import torch
 from torch.utils.data import Subset
 
-from experiments.hdae.data.attr_predictor import AttrSpec, train_attr_predictor
+from experiments.hdae.data.attr_predictor import AttrSpec, AugmentConfig, train_attr_predictor
 from experiments.hdae.data.morphomnist import MorphoMNISTPacked
 
 logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(message)s")
@@ -88,6 +88,13 @@ def main():
     p.add_argument("--base-channels", type=int, default=32)
     p.add_argument("--num-workers", type=int, default=4)
     p.add_argument("--accelerator", default="auto")
+    p.add_argument("--weight-decay", type=float, default=0.0)
+    p.add_argument("--dropout", type=float, default=0.0)
+    p.add_argument("--lr-plateau-patience", type=int, default=0,
+                   help="epochs of no val_loss improvement before halving LR; 0 disables the scheduler")
+    p.add_argument("--augment", action="store_true",
+                   help="mild Gaussian-noise + brightness-jitter augmentation on the train split only "
+                        "(no blur -- would destroy the edge-orientation signal rotation/slant need)")
     p.add_argument("--only", nargs="*", default=None, help="subset of TARGET_ATTRS to train (default: all 12)")
     p.add_argument("--skip-training", action="store_true",
                    help="only rebuild training_summary.json from whatever's already on disk (used by the "
@@ -110,6 +117,9 @@ def main():
     targets = args.only or TARGET_ATTRS
     Path(args.output_dir).mkdir(parents=True, exist_ok=True)
 
+    augment = AugmentConfig(gaussian_noise_prob=0.3, gaussian_noise_std=0.03,
+                            brightness_jitter_prob=0.3, brightness_jitter_strength=0.1) if args.augment else None
+
     if not args.skip_training:
         for name in targets:
             spec = specs[name]
@@ -120,6 +130,8 @@ def main():
                 spec=spec, attr_col=col,
                 train_dataset=Subset(ds, train_indices.tolist()), val_dataset=Subset(ds, val_indices.tolist()),
                 output_dir=args.output_dir, base_channels=args.base_channels, lr=args.lr,
+                weight_decay=args.weight_decay, dropout=args.dropout, lr_plateau_patience=args.lr_plateau_patience,
+                augment=augment,
                 batch_size=args.batch_size, max_epochs=args.max_epochs, patience=args.patience,
                 num_workers=args.num_workers, accelerator=args.accelerator,
             )
