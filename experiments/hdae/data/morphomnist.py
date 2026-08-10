@@ -321,26 +321,36 @@ def pad_digit(img28_u8: np.ndarray, pad: int) -> np.ndarray:
 class MorphoMNISTPacked(Dataset):
     """Packed MorphoMNIST++ dataset -- mirrors CelebAHQPacked's ``{"img","attr"}`` contract.
 
-    Backed by HDF5, opened lazily per-process (see ``__getstate__``/``_open``) --
+    Backed by HDF5, opened lazily per-process by default (see ``__getstate__``/``_open``) --
     an ``h5py.File`` handle inherited across a DataLoader ``fork`` produces
     silent garbage reads, not an error, so it must never be opened in
     ``__init__`` and pickled into worker processes. Same fork-safety pattern
     as ``celeba_hq.py``'s LMDB env.
 
     ``attrs``/``attribute_names``/``partitions`` are small (a few hundred KB
-    total) and loaded eagerly into memory; only ``images`` stays on disk
-    behind the lazy handle.
+    total) and loaded eagerly into memory regardless.
+
+    ``preload_images=True`` reads the entire (~860MB decompressed) image
+    array into RAM up front instead of decompressing per-item lzf chunks on
+    every access -- fine for this dataset's size, and the right choice when
+    training many small independent networks against it concurrently (one
+    dataset copy per process; per-item access becomes a plain slice, no
+    per-worker HDF5/lzf overhead, no DataLoader worker fan-out needed).
+    Leave it False for anything closer to CelebA-HQ scale.
     """
 
-    def __init__(self, h5_path):
+    def __init__(self, h5_path, preload_images: bool = False):
         self.h5_path = str(h5_path)
         self._file = None
+        self._preloaded = None
         with h5py.File(self.h5_path, "r") as f:
             self.attrs = f["attrs"][:]  # (N, len(attribute_names)) float32
             self.attribute_names = [x.decode("utf-8") if isinstance(x, bytes) else str(x)
                                     for x in f["attribute_names"][:]]
             self.partitions = f["partitions"][:]  # (N,) int, 0=train 1=test
             self._n = f["images"].shape[0]
+            if preload_images:
+                self._preloaded = f["images"][:]
 
     def _open(self):
         if self._file is None:
@@ -351,7 +361,7 @@ class MorphoMNISTPacked(Dataset):
         return self._n
 
     def __getitem__(self, index):
-        image = self._open()["images"][index]  # (canvas_size, canvas_size, 3) uint8
+        image = self._preloaded[index] if self._preloaded is not None else self._open()["images"][index]
         img = torch.from_numpy(image.copy()).permute(2, 0, 1).float().div_(127.5).sub_(1)
         return {"img": img, "index": index, "attr": torch.from_numpy(self.attrs[index].copy()),
                "partition": int(self.partitions[index])}
