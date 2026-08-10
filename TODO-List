@@ -126,18 +126,40 @@ full reconciliation of a separately-supplied experiment plan against this repo):
   torchvision's public MNIST download only — no other local project's data or code was
   used, per explicit instruction). Real thickness/intensity perturbation via grayscale
   morphology (not synthetic placeholders), `intensity` causally dependent on `thickness`
-  (Pearson r = -0.66 in the rendered pixels — tuned up from an initial -0.06, see
-  `data/verify_morphomnist.py`'s check 2 and the gain/noise comment in `morphomnist.py`).
-  Modeled attributes `{digit, thickness, intensity, hue}` (hue confirmed as a 4th modeled
-  node, your call); injected-but-unobserved `{slant, rotation, scale, translate_x/y,
+  (Pearson r = -0.41 in the rendered pixels; see `data/verify_morphomnist.py` check 2 and
+  the gain/noise comment in `morphomnist.py` for the full tuning history). Modeled
+  attributes `{digit, thickness, intensity, hue}` (hue confirmed as a 4th modeled node,
+  your call); injected-but-unobserved `{slant, rotation, scale, translate_x/y,
   bg_freq/phase/amplitude, texture_seed/amplitude}`, logged per-image. Deferred: local
   swelling/fractures/stroke-width modulation (need skeleton-based morphology, not
   load-bearing for this gate).
-- Found and fixed a real bug during this pass: naive erosion was over-thinning already-thin
-  digits to nothing (15% of the dataset silently vanished) — fixed with a vanish-guard that
-  backs off to a smaller radius before accepting current thickness over an unreachable target.
+- **Four real bugs found and fixed, the last three after you flagged unrecognizable images
+  in a sample review — automated checks (round-trip, correlation sign) didn't catch any of
+  these because none of them break determinism or the correlation's *sign*, only its
+  *visual legibility*, which no assertion was checking:**
+  1. Naive erosion over-thinning already-thin digits to nothing (15% of the dataset
+     silently vanished) — fixed with a guard that backs off to a smaller erosion radius
+     before accepting current thickness over an unreachable target.
+  2. Geometric transforms (rotation/shear/scale/translation) clipped real digit content at
+     the canvas edge — only 2px of padding around a 28px digit that often already touched
+     the edge. Fixed by padding out to a larger canvas before the affine warp and cropping
+     back after, giving real headroom.
+  3. The thickness prior's upper bound (5.5px) closed the loops on 8/9/0/6 shut entirely,
+     turning them into blobs — not a code bug, a range that was too aggressive for this
+     resolution. Lowered to 4.0px.
+  4. Subtler: guard #1 preventing *total* vanishing didn't prevent *severe* thinning (a
+     digit reduced to a few residual fragments still has "some" measurable thickness).
+     Fixed by also guarding on foreground pixel count, not just thickness > 0. This in turn
+     exposed a second, independent bug: intensity's target was computed from thickness's
+     *requested* value, not what guard #1 actually achieved — so images where the guard
+     overrode the request had a scrambled causal link. Fixed by computing intensity's
+     target from thickness's achieved value.
+  All four confirmed by direct visual re-inspection after each fix, not just by rerunning
+  the automated gate — see `data/verify_morphomnist.py`'s docstring for what it does and
+  does not catch.
 - `experiments/hdae/data/verify_morphomnist.py`: determinism/round-trip, the causal
-  correlation, and hue-geometry-independence all pass (Phase 1 gate).
+  correlation, and hue-geometry-independence all pass (Phase 1 gate) — but note above that
+  this gate alone did not catch three of the four bugs; visual review found them.
 - `experiments/hdae/configs/causal_graph_morpho.yaml` + `causal/scm.py` generalized from
   CelebA's binary-only nodes to per-node `kind` (binary/continuous/categorical) — `digit`
   is a real categorical SCM node (your call, the harder of two options), `thickness`/

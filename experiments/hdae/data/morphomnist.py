@@ -49,14 +49,20 @@ ATTRIBUTE_NAMES = MODELED_ATTRS + UNOBSERVED_ATTRS
 
 # Priors for sampled (not measured) factors. Deliberately generous but bounded so digits stay
 # recognizable -- these are modeling choices, not derived from any external source.
-THICKNESS_TARGET_RANGE = (1.2, 5.5)          # px, average stroke half-width * 2
+# Upper bound was originally 5.5px; that closed the loops on 8/9/0/6 entirely (natural MNIST
+# stroke width is ~1.5-2.5px), turning them into unrecognizable blobs. Lowered after visual review.
+THICKNESS_TARGET_RANGE = (1.2, 4.0)          # px, average stroke half-width * 2
 INTENSITY_BASE_RANGE = (140.0, 220.0)        # 0-255 mean foreground gray level before the thickness effect
-# Gain/noise tuned empirically (not the first values tried): the achieved-pixel correlation is
-# substantially weaker than the target-space correlation (measurement noise from the morphology
-# ops attenuates it), so the target-space signal needs real headroom above "just detectable" for
-# the *achieved* thickness/intensity correlation -- what CF1 eval will actually measure -- to be
-# robustly negative. GAIN=6/NOISE=12 gave target corr -0.33 but achieved corr only ~-0.06; this
-# setting gives target corr ~-0.76, achieved ~-0.67. See data/verify_morphomnist.py check 2.
+# Gain/noise tuned empirically. Two mistakes found and fixed along the way, in order:
+# 1. GAIN=6/NOISE=12 gave a real but weak achieved-pixel correlation (~-0.06) -- too weak
+#    relative to measurement noise from the morphology ops to trust as "a real causal effect".
+# 2. Raising gain alone plateaued around -0.42 regardless -- because intensity's target was
+#    computed from the *requested* thickness, not what morphology actually achieved (see
+#    render()'s docstring): when the vanish-guard (_set_thickness) overrode a hard-to-reach
+#    request, the intensity target no longer matched the real thickness, adding noise no
+#    amount of gain could out-shout. Fixed by computing intensity's target from achieved
+#    thickness. With that fix, these GAIN/NOISE values give achieved-pixel corr ~-0.42 (n=3000
+#    sample; see data/verify_morphomnist.py check 2 for the full-dataset number).
 INTENSITY_THICKNESS_GAIN = 22.0
 INTENSITY_NOISE_STD = 5.0
 SLANT_RANGE = (-25.0, 25.0)                  # degrees, shear
@@ -83,18 +89,24 @@ def measure_intensity(gray_u8: np.ndarray) -> float:
     return float(fg.mean()) if fg.size else 0.0
 
 
-def _set_thickness(gray_u8: np.ndarray, target: float, max_iters: int = 6) -> np.ndarray:
+def _set_thickness(gray_u8: np.ndarray, target: float, max_iters: int = 6,
+                   min_pixel_fraction: float = 0.6) -> np.ndarray:
     """Iteratively dilate/erode (grayscale, so anti-aliased edges are preserved) towards ``target``.
 
-    Thin digits (thickness already near/below the low end of
-    ``THICKNESS_TARGET_RANGE``) can vanish under even a single radius-1
-    erosion. Guard against that explicitly: never apply a step that erases
-    the digit, backing off to a smaller radius first and, failing that,
-    accepting the current (non-erased) thickness rather than hitting an
-    unreachable target. A vanished digit would make ``thickness``/
-    ``intensity`` undefined and silently corrupt the dataset.
+    Two failure modes guarded against, both found by visual review, not just
+    by thickness reaching zero:
+    - Thin digits can vanish entirely under even a single radius-1 erosion.
+    - Short of total vanishing, erosion can strip a digit down to a few
+      residual fragments (measurable, nonzero "thickness", but visually
+      destroyed) -- e.g. a recognizable "9" eroded to ~10% of its original
+      ink. Guard on *foreground pixel count*, not just thickness>0: never
+      apply a step that drops below ``min_pixel_fraction`` of the original
+      foreground pixel count, backing off to a smaller radius first and,
+      failing that, accepting the current thickness over an unreachable target.
     """
     img = gray_u8.copy()
+    original_fg = int((gray_u8 > 20).sum())
+    min_fg = max(1, int(min_pixel_fraction * original_fg))
     for _ in range(max_iters):
         current = measure_thickness(img)
         if current <= 1e-6:
@@ -106,11 +118,11 @@ def _set_thickness(gray_u8: np.ndarray, target: float, max_iters: int = 6) -> np
         candidate = None
         for r in range(radius, 0, -1):
             trial = dilation(img, disk(r)) if diff > 0 else erosion(img, disk(r))
-            if measure_thickness(trial) > 1e-6:
+            if measure_thickness(trial) > 1e-6 and int((trial > 20).sum()) >= min_fg:
                 candidate = trial
                 break
         if candidate is None:
-            break  # even radius=1 would erase the digit; stop, keep current thickness
+            break  # even radius=1 would erase/gut the digit; stop, keep current thickness
         img = candidate
     return img
 
@@ -193,6 +205,13 @@ class Factors:
     bg_amplitude: float
     texture_seed: int
     texture_amplitude: float
+    # Not part of ATTRIBUTE_NAMES / the logged record -- generation-time-only components so
+    # render() can compute intensity's target from thickness's *achieved* value (see render()'s
+    # docstring for why: the requested thickness target and what morphology actually achieves can
+    # diverge, and computing intensity from the request rather than the outcome breaks the causal
+    # link for every image where they diverge).
+    intensity_base: float = 0.0
+    intensity_noise: float = 0.0
 
     def to_vector(self) -> np.ndarray:
         return np.array([getattr(self, name) for name in ATTRIBUTE_NAMES], dtype=np.float32)
@@ -227,7 +246,7 @@ def sample_targets(index: int, digit: int) -> Dict[str, float]:
     return dict(digit=digit, thickness=thickness_target, intensity=intensity_target, hue=hue, slant=slant,
                rotation=rotation, scale=scale, translate_x=tx, translate_y=ty, bg_freq=bg_freq,
                bg_phase=bg_phase, bg_amplitude=bg_amplitude, texture_seed=texture_seed,
-               texture_amplitude=texture_amplitude)
+               texture_amplitude=texture_amplitude, intensity_base=intensity_base, intensity_noise=intensity_noise)
 
 
 def render(base_digit_u8: np.ndarray, factors: Factors, measure: bool = True) -> Tuple[np.ndarray, Factors]:
@@ -238,15 +257,32 @@ def render(base_digit_u8: np.ndarray, factors: Factors, measure: bool = True) ->
     (may differ slightly from the input targets -- morphology doesn't hit
     an exact target every time). Pass ``measure=False`` only when
     re-rendering from an already-measured record (round-trip check).
+
+    When ``measure`` is True, intensity's target is recomputed from
+    thickness's *achieved* value (via ``factors.intensity_base``/
+    ``intensity_noise``), not the originally requested ``factors.thickness``
+    -- morphology's vanish-guard (``_set_thickness``) can leave the achieved
+    value well short of a hard-to-reach request, and computing intensity
+    from the request rather than the outcome breaks the causal link on
+    every image where they diverge.
     """
     gray = _set_thickness(base_digit_u8, factors.thickness)
-    gray = _set_intensity(gray, factors.intensity)
     achieved_thickness = measure_thickness(gray) if measure else factors.thickness
+    intensity_target = (factors.intensity_base - INTENSITY_THICKNESS_GAIN * achieved_thickness
+                        + factors.intensity_noise) if measure else factors.intensity
+    gray = _set_intensity(gray, intensity_target)
     achieved_intensity = measure_intensity(gray) if measure else factors.intensity
 
     rgb = _apply_hue(gray, factors.hue)
-    rgb = _apply_geometry(rgb, factors.slant, factors.rotation, factors.scale,
-                          factors.translate_x, factors.translate_y)
+    # Geometry needs margin: with only PAD=2px around a 28px digit that often already touches
+    # the edge, rotation/shear/scale/translation routinely clipped real digit content off-canvas
+    # (mode="constant" fills the clipped area with background, silently deleting strokes). Pad
+    # out, warp on the padded canvas where there's real headroom, then crop back to IMAGE_SIZE.
+    margin = 12
+    rgb_padded = np.pad(rgb, ((margin, margin), (margin, margin), (0, 0)), mode="constant", constant_values=0)
+    rgb_padded = _apply_geometry(rgb_padded, factors.slant, factors.rotation, factors.scale,
+                                 factors.translate_x, factors.translate_y)
+    rgb = rgb_padded[margin:-margin, margin:-margin]
     rgb = _apply_background(rgb, factors.bg_freq, factors.bg_phase, factors.bg_amplitude)
     rgb = _apply_texture(rgb, factors.texture_seed, factors.texture_amplitude)
 
