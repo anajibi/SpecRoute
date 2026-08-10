@@ -27,7 +27,7 @@ import torch
 import yaml
 
 from experiments.hdae.causal.graph import CausalGraph
-from experiments.hdae.causal.scm import SCM
+from experiments.hdae.causal.scm import SCM, node_specs_from_config
 
 logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(message)s")
 
@@ -45,23 +45,27 @@ def main():
     with open(args.causal_graph) as f:
         raw = yaml.safe_load(f)
     graph = CausalGraph.from_dict(raw)
-    eps = float(raw.get("logit_smoothing_eps", 0.05))
+    node_specs = node_specs_from_config(raw, graph)
     output = Path(args.output or raw["scm_checkpoint"])
     output.parent.mkdir(parents=True, exist_ok=True)
 
     arrays = np.load(args.attr_npz, allow_pickle=True)
     attr_names = [str(x) for x in arrays["attribute_names"]]
     cols = [attr_names.index(a) for a in graph.attributes]
-    attrs01 = torch.from_numpy((arrays["attrs"][:, cols] > 0).astype(np.float32))
+    attrs_matrix = arrays["attrs"][:, cols].astype(np.float32)
+    for j, node in enumerate(graph.attributes):
+        if node_specs[node].kind == "binary":
+            attrs_matrix[:, j] = (attrs_matrix[:, j] > 0).astype(np.float32)
+    attrs = torch.from_numpy(attrs_matrix)
     attr_index = {name: i for i, name in enumerate(graph.attributes)}
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    scm = SCM(graph, eps).to(device)
+    scm = SCM(graph, node_specs).to(device)
     opt = torch.optim.Adam(scm.parameters(), lr=args.lr)
-    data = attrs01.to(device)
+    data = attrs.to(device)
     n = data.shape[0]
-    logging.info("fitting SCM: attributes=%s edges=%s eps=%.3f n_images=%d device=%s",
-                 graph.attributes, raw.get("edges", []), eps, n, device)
+    logging.info("fitting SCM: attributes=%s edges=%s kinds=%s n_images=%d device=%s",
+                 graph.attributes, raw.get("edges", []), {n_: s.kind for n_, s in node_specs.items()}, n, device)
     log_every = max(1, args.epochs // 10)
     for epoch in range(args.epochs):
         perm = torch.randperm(n, device=device)

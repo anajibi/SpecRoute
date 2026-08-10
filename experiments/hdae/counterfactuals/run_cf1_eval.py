@@ -42,7 +42,7 @@ from experiments.hdae.counterfactuals import diffae_adapter  # noqa: F401
 from experiments.hdae.counterfactuals.attr_classifier import load_classifier
 from experiments.hdae.counterfactuals.cf_contract import load_adapter
 from experiments.hdae.causal.graph import CausalGraph
-from experiments.hdae.causal.scm import SCM
+from experiments.hdae.causal.scm import SCM, node_specs_from_config
 from experiments.hdae.data.celeba_hq import CelebAHQPacked
 from experiments.hdae.hdae.grid_utils import save_labeled_grid
 
@@ -225,17 +225,18 @@ def main():
     with open(args.causal_graph) as f:
         causal_raw = yaml.safe_load(f)
     graph = CausalGraph.from_dict(causal_raw)
+    yaml_specs = {n: s.to_dict() for n, s in node_specs_from_config(causal_raw, graph).items()}
     scm_ckpt = args.scm_checkpoint or causal_raw["scm_checkpoint"]
     logging.info("loading SCM checkpoint=%s attributes=%s edges=%s", scm_ckpt, graph.attributes, graph.edges)
     scm = SCM.load(scm_ckpt, device=device)
-    yaml_eps = float(causal_raw["logit_smoothing_eps"])
+    ckpt_specs = {n: s.to_dict() for n, s in scm.specs.items()}
     if (set(scm.graph.attributes), sorted(scm.graph.edges)) != (set(graph.attributes), sorted(graph.edges)) \
-            or abs(scm.eps - yaml_eps) > 1e-12:
+            or ckpt_specs != yaml_specs:
         raise ValueError(
             f"SCM checkpoint {scm_ckpt} was fit on attributes={scm.graph.attributes} edges={scm.graph.edges} "
-            f"eps={scm.eps}, but {args.causal_graph} currently declares attributes={graph.attributes} "
-            f"edges={graph.edges} eps={yaml_eps} — re-run experiments/hdae/causal/train_scm.py "
-            f"(edges/eps changed since the checkpoint was fit)")
+            f"node_specs={ckpt_specs}, but {args.causal_graph} currently declares attributes={graph.attributes} "
+            f"edges={graph.edges} node_specs={yaml_specs} — re-run experiments/hdae/causal/train_scm.py "
+            f"(edges/node kinds/eps/range changed since the checkpoint was fit)")
 
     logging.info("loading model_type=%s config=%s ckpt=%s on device=%s", args.model_type, args.config, args.ckpt, device)
     adapter = load_adapter(args.model_type, args.config, args.ckpt, device, edit_strength=args.edit_strength, T=args.T)

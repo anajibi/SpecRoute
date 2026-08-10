@@ -10,6 +10,8 @@ data/**/*
 **/data/**/*
 !data/**/*.py
 !data/*.py
+!**/data/**/*.py
+!**/data/*.py
 
 diffae_latent_probe/data/
 

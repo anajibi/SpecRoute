@@ -1,0 +1,26 @@
+# Causal DAG over MorphoMNIST++'s modeled attributes (TODO item 3 + item 2).
+# Shared, model-agnostic config -- mirrors configs/causal_graph.yaml's shape,
+# extended with per-node `kind` (this dataset needs continuous + categorical
+# nodes, not just CelebA's binary attributes; see causal/scm.py NodeSpec).
+attributes: [digit, thickness, intensity, hue]
+edges: [[thickness, intensity]]
+
+# digit and hue are root nodes (no edges in or out); thickness -> intensity
+# is the one declared edge, matching the real, measured pixel-level
+# relationship baked into data/morphomnist.py (see
+# data/verify_morphomnist.py check 2: Pearson r ~ -0.66 in the packed data).
+nodes:
+  digit:
+    kind: categorical
+    num_classes: 10
+  thickness:
+    kind: continuous
+    range: [1.0, 7.5]      # px; empirical packed-data range is [2.0, 6.8], padded for headroom
+  intensity:
+    kind: continuous
+    range: [20.0, 220.0]   # 0-255 gray level; empirical range is [37, 201], padded
+  hue:
+    kind: continuous
+    range: [0.0, 1.0]
+
+scm_checkpoint: experiments/hdae/outputs/scm/morpho_scm.pt

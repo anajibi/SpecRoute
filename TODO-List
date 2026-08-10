@@ -110,7 +110,7 @@ Open decisions, resolved:
 - Binary attributes — logit-of-smoothed-probability, `eps` in config.
 
 
-## 3. Bring in MorphoMNIST and Causal3DIdent datasets
+## 3. Bring in MorphoMNIST and Causal3DIdent datasets — MorphoMNIST dataset+graph done (2026-08-10), rest not started
 
 > Third, I need to bring MorphoMnist and Causal3DIdent dataset.
 
@@ -118,27 +118,53 @@ Goal: broaden evaluation past faces, and — more importantly — get datasets w
 *known* ground-truth causal graph to validate item 2's learned graph against, since
 CelebA has no ground truth to check against.
 
-Plan:
-- Mirror the existing `data/celeba_hq.py` + `data/datamodule.py` +
-  `scripts/preprocess_data.py` pattern: `data/morphomnist.py` and
-  `data/causal3dident.py`, each exposing the same `{"img", "attr"}` batch contract the
-  rest of the pipeline (training, latent probing, `run_cf1_eval.py`) already relies on.
-- Add a `data.dataset_name` config field so `preprocess_data.py`/`datamodule.py` dispatch
-  by dataset instead of being CelebA-HQ-only; add `configs/morphomnist_*.yaml` /
-  `configs/causal3dident_*.yaml` following the `hier_k*.yaml` shape
-  (see experiments/hdae/AGENDA.md §4).
-- Both datasets ship their true causal graph/factor metadata with the images — store that
-  as the declared DAG for item 2's SCM module on these two datasets specifically, which is
-  the actual point of adding them (check whether the learned flow-based graph recovers the
-  known one before trusting it on CelebA).
+**What landed this pass (MorphoMNIST++ dataset + causal graph only — explicit
+instruction: "you should not change the models at all", so no HDAE integration, no
+`data.dataset_name` dispatch, no ABLE/depth-ablation model — see `EXP_NOTES.md` for the
+full reconciliation of a separately-supplied experiment plan against this repo):**
+- `experiments/hdae/data/morphomnist.py`: built from scratch (raw digits from
+  torchvision's public MNIST download only — no other local project's data or code was
+  used, per explicit instruction). Real thickness/intensity perturbation via grayscale
+  morphology (not synthetic placeholders), `intensity` causally dependent on `thickness`
+  (Pearson r = -0.66 in the rendered pixels — tuned up from an initial -0.06, see
+  `data/verify_morphomnist.py`'s check 2 and the gain/noise comment in `morphomnist.py`).
+  Modeled attributes `{digit, thickness, intensity, hue}` (hue confirmed as a 4th modeled
+  node, your call); injected-but-unobserved `{slant, rotation, scale, translate_x/y,
+  bg_freq/phase/amplitude, texture_seed/amplitude}`, logged per-image. Deferred: local
+  swelling/fractures/stroke-width modulation (need skeleton-based morphology, not
+  load-bearing for this gate).
+- Found and fixed a real bug during this pass: naive erosion was over-thinning already-thin
+  digits to nothing (15% of the dataset silently vanished) — fixed with a vanish-guard that
+  backs off to a smaller radius before accepting current thickness over an unreachable target.
+- `experiments/hdae/data/verify_morphomnist.py`: determinism/round-trip, the causal
+  correlation, and hue-geometry-independence all pass (Phase 1 gate).
+- `experiments/hdae/configs/causal_graph_morpho.yaml` + `causal/scm.py` generalized from
+  CelebA's binary-only nodes to per-node `kind` (binary/continuous/categorical) — `digit`
+  is a real categorical SCM node (your call, the harder of two options), `thickness`/
+  `intensity`/`hue` continuous via min-max normalization (`causal/normalize.py`
+  extended). Categorical support is root-nodes-only (digit has no parents here) — a
+  parent-conditioned categorical node would need Gumbel-max abduction, not implemented,
+  raises `NotImplementedError` rather than doing something silently wrong.
+  `causal/verify_scm_morpho.py`: round-trip (all 4 node kinds), `do(thickness)`
+  propagates to `intensity`, `do(digit)` is isolated — all pass on the real fitted graph
+  (not a toy detour, unlike CelebA's edgeless case).
+  **Regression-checked:** this touches shared code CelebA's item-2 pipeline depends on —
+  `causal/verify_scm.py` (toy DAG) and a full CelebA `run_cf1_eval.py` smoke run were
+  re-run after the generalization and match pre-change numbers exactly.
+- `causal/train_scm.py`/`run_cf1_eval.py` updated for the generalized `NodeSpec`-based
+  checkpoint format (was a single global `eps`; is now per-node kind/eps/range/
+  num_classes) — the checkpoint/config consistency guard from item 2 now compares full
+  node-spec dicts, not just `eps`.
+
+**Not done:** Causal3DIdent entirely; `data.dataset_name` dispatch (doesn't exist for
+CelebA either, see AGENDA.md §2); wiring MorphoMNIST into HDAE training/`preprocess_data.py`;
+any adapter/model for it. Phase 5-equivalent (CF1 eval on Morpho) needs a way to *measure*
+whether a rendered counterfactual's unobserved factors match the source's — CelebA does
+this via a trained classifier; Morpho's equivalent isn't decided (see `EXP_NOTES.md`,
+"Open item for a later phase").
 
 Depends on: nothing technically, but its main value is validating item 2, so treating it
-as strictly-after-item-2 wastes that value.
-
-Open decision (your call): stand up (at least) the MorphoMNIST loader now, in parallel
-with item 2's SCM design, so the SCM code has a dataset with a known-correct answer to
-test against instead of only CelebA where correctness can't be checked — or keep it
-third as listed. Recommend pulling it earlier; your call on priority.
+as strictly-after-item-2 wastes that value. (In practice landed after item 2, as planned.)
 
 
 ## 4. Decompose CF1 into observed CF1, unobserved CF1, and Aggregated CF1 — DONE (2026-07-31)

@@ -35,7 +35,7 @@ import torch
 
 from experiments.hdae.causal.graph import CausalGraph
 from experiments.hdae.causal.normalize import to_prob
-from experiments.hdae.causal.scm import SCM
+from experiments.hdae.causal.scm import SCM, default_node_specs
 
 logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(message)s")
 
@@ -53,7 +53,7 @@ def main():
     attrs01 = torch.from_numpy((arrays["attrs"][:, cols] > 0).astype(np.float32))
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    scm = SCM(graph, eps=0.05).to(device)
+    scm = SCM(graph, default_node_specs(graph, eps=0.05)).to(device)
     opt = torch.optim.Adam(scm.parameters(), lr=1e-2)
     data = attrs01.to(device)
     n = data.shape[0]
