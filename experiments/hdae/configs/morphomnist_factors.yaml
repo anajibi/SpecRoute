@@ -31,12 +31,17 @@ factors:
   # --- injected, unobserved (logged, outside the causal graph) ---
   # Ranges widened from the 32x32 canvas's originals now that there's real margin (previously
   # 2px padding around a 28px digit left almost no room; 18px padding on a 64px canvas does).
+  # discrete_bins (not uniform): the predictor for these two is a 20-way classifier
+  # (data/train_morpho_attr_predictors.py CATEGORICAL_ATTRS), and generating a continuous angle
+  # anywhere within a bin -- rather than exactly at its center -- leaves real intra-class pixel
+  # variation the classifier can't resolve even in principle. Sampling only the 20 bin centers
+  # removes that residual ambiguity; range/bin-count here MUST match CATEGORICAL_ATTRS exactly.
   slant:
-    distribution: uniform
-    params: {low: -30.0, high: 30.0}       # degrees, shear
+    distribution: discrete_bins
+    params: {low: -45.0, high: 45.0, num_bins: 20}   # degrees, shear
   rotation:
-    distribution: uniform
-    params: {low: -35.0, high: 35.0}       # degrees
+    distribution: discrete_bins
+    params: {low: -45.0, high: 45.0, num_bins: 20}   # degrees
   scale:
     distribution: uniform
     params: {low: 0.7, high: 1.4}

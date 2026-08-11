@@ -43,9 +43,13 @@ IMAGE_CHUNK_ROWS = 256  # chunk along the batch dim so sequential batch reads ar
 
 
 def build_split_into(mnist_ds, config, index_offset, n, images_ds, attrs_ds, out_offset, log_every=10000):
+    """`n` may exceed `len(mnist_ds)` -- base images then cycle (`i % len(mnist_ds)`), each repeat
+    getting a genuinely different factor draw since `global_index` (used as the per-image RNG
+    seed) is never taken modulo the dataset length, only the base-image lookup is."""
     t0 = time.time()
+    n_base = len(mnist_ds)
     for i in range(n):
-        img28, digit = mnist_ds[i]
+        img28, digit = mnist_ds[i % n_base]
         img_padded = pad_digit(np.array(img28, dtype=np.uint8), config["image"]["pad"])
         global_index = index_offset + i
         factors = Factors(**sample_targets(global_index, int(digit), config))
@@ -61,8 +65,9 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument("--factor-config", default=DEFAULT_FACTOR_CONFIG_PATH)
     p.add_argument("--raw-dir", default="experiments/hdae/data/raw/mnist")
-    p.add_argument("--n-train", type=int, default=60000)
-    p.add_argument("--n-test", type=int, default=10000)
+    p.add_argument("--n-train", type=int, default=60000, help="may exceed MNIST's native 60k -- base "
+                   "images cycle, each repeat gets a distinct factor draw (see build_split_into)")
+    p.add_argument("--n-test", type=int, default=10000, help="may exceed MNIST's native 10k, same as --n-train")
     p.add_argument("--output", default="experiments/hdae/data/packed/morphomnist.h5")
     args = p.parse_args()
 
@@ -73,9 +78,11 @@ def main():
     logging.info("downloading/loading standard MNIST from torchvision into %s", args.raw_dir)
     train_ds = MNIST(root=args.raw_dir, train=True, download=True)
     test_ds = MNIST(root=args.raw_dir, train=False, download=True)
-    n_train = min(args.n_train, len(train_ds))
-    n_test = min(args.n_test, len(test_ds))
+    n_train, n_test = args.n_train, args.n_test
     n_total = n_train + n_test
+    if n_train > len(train_ds) or n_test > len(test_ds):
+        logging.info("n_train/n_test exceed MNIST's native %d/%d -- base images will repeat with "
+                     "distinct sampled factors per repeat", len(train_ds), len(test_ds))
 
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)

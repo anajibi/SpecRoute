@@ -3,26 +3,18 @@
 `measure_morphomnist.py` script, on `partition==1` -- the packed test split, never seen by any
 CNN during training or checkpoint selection.
 
-The headline result is NOT "CNN beats deterministic by X%" across the board -- it's
-disentanglement. `measure_morphomnist.py` can only report one *combined* orientation angle
-(rotation and slant are conflated in a single image, and both are further confounded with the
-digit's own shape) and an *uncalibrated* size proxy (no reference frame without the
-pre-transform image). The CNN, trained directly on the logged ground truth, can recover
-rotation, slant, and scale as three separate quantities. So the comparison is genuinely
-three-tiered:
+Two families of metric, matching the two families of predictor:
 
-- near-tie (thickness, intensity, hue, bg_freq): both methods get a real, comparable number.
-- deterministic gets a fitted assist (scale only): the baseline has no closed-form access to a
-  multiplicative scale factor, so its "size proxy" (px) is calibrated to ground-truth `scale`
-  via a least-squares linear fit -- fit on the *train* split only, applied to test. This gives
-  the deterministic method its best possible shot, and the comparison still isn't close.
-- deterministic has no comparable number at all (rotation, slant): the CNN's error is reported
-  on its own; the deterministic script's "orientation" is shown for reference only, explicitly
-  not a competing estimate of either quantity.
-
-Circular attributes (hue, bg_phase) are trained on sin/cos but reported here in original units
-(hue-units / radians), matching how `measure_morphomnist.py`'s own error was reported earlier in
-this experiment.
+- Continuous attributes (thickness, intensity, hue, scale, translate_x/y, bg_freq/phase/amplitude,
+  texture_amplitude): mean absolute error, in original units. Most have a real closed-form
+  comparison point in measure_morphomnist.py; scale doesn't (no closed-form access to a
+  multiplicative factor), so its baseline is a train-only linear calibration of the deterministic
+  size proxy instead -- the baseline's best possible shot, not an equivalent estimator.
+- Categorical attributes (rotation, slant, digit): accuracy and macro-F1 (sklearn) over the
+  predictor's own bins, no regression fallback. None of the three has a closed-form baseline --
+  rotation/slant because a single image can't disentangle them from each other or from the
+  digit's own shape, digit because recognizing it needs a classifier by definition (same reason
+  measure_morphomnist.py has always excluded it).
 
 Writes a JSON results file for the publish step; does not itself render anything.
 """
@@ -37,13 +29,12 @@ sys.path.insert(0, str(ROOT))
 
 import numpy as np
 import torch
+from sklearn.metrics import f1_score
 
-from experiments.hdae.data.attr_predictor import load_attr_predictor
-from experiments.hdae.data.measure_morphomnist import (measure_all, measure_background_from_image,
-                                                        measure_hue_from_image, measure_intensity_from_image,
-                                                        measure_scale_proxy_from_image, measure_thickness_from_image)
+from experiments.hdae.data.attr_predictor import AttrSpec, load_attr_predictor
+from experiments.hdae.data.measure_morphomnist import measure_all, measure_scale_proxy_from_image
 from experiments.hdae.data.morphomnist import MorphoMNISTPacked
-from experiments.hdae.data.train_morpho_attr_predictors import TARGET_ATTRS
+from experiments.hdae.data.train_morpho_attr_predictors import CATEGORICAL_ATTRS, TARGET_ATTRS
 
 logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(message)s")
 
@@ -53,7 +44,7 @@ DETERMINISTIC_KEY = {
     "translate_x": "translate_x", "translate_y": "translate_y",
     "bg_amplitude": "bg_amplitude", "texture_amplitude": "texture_amplitude",
     "bg_phase": "bg_phase",
-    "rotation": None, "slant": None,  # measure_all gives one combined "orientation", not these two
+    "rotation": None, "slant": None, "digit": None,  # categorical, no closed-form estimator at all
     "scale": None,  # calibrated separately below (fitted linear proxy, not in measure_all)
 }
 CIRCULAR = {"hue": 1.0, "bg_phase": 2 * np.pi}
@@ -92,7 +83,7 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument("--packed", default="experiments/hdae/data/packed/morphomnist.h5")
     p.add_argument("--predictors-dir", default="experiments/hdae/outputs/attr_predictors")
-    p.add_argument("--n-test", type=int, default=2000, help="subset of the (10k) test split to evaluate "
+    p.add_argument("--n-test", type=int, default=2000, help="subset of the test split to evaluate "
                    "(measure_morphomnist.py's curve_fit-based background estimate is slow per-image)")
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--output", default="experiments/hdae/outputs/attr_predictors/comparison_results.json")
@@ -110,15 +101,17 @@ def main():
     summary = json.loads((Path(args.predictors_dir) / "training_summary.json").read_text())
     models = {name: load_attr_predictor(info["checkpoint"], attr_col=info["attr_col"]).to(device)
              for name, info in summary.items()}
+    specs = {name: AttrSpec(name=name, kind=info["kind"], lo=info.get("lo"), hi=info.get("hi"),
+                            period=info.get("period"), num_bins=info.get("num_bins"))
+            for name, info in summary.items()}
 
     scale_a, scale_b = fit_scale_calibration(ds, train_indices, seed=args.seed)
 
     cnn_pred = {name: [] for name in TARGET_ATTRS}
     det_pred = {name: [] for name in TARGET_ATTRS}
     gt = {name: [] for name in TARGET_ATTRS}
-    orientation_ref = []  # deterministic combined orientation, logged for rotation/slant rows (not an error metric)
 
-    imgs_batch, idx_batch = [], []
+    imgs_batch = []
     BATCH = 128
 
     def flush_cnn():
@@ -143,7 +136,6 @@ def main():
             key = DETERMINISTIC_KEY[name]
             det_pred[name].append(meas[key] if key is not None else float("nan"))
         det_pred["scale"][-1] = scale_a * meas["scale_proxy"] + scale_b
-        orientation_ref.append(meas["orientation"])
         if (count + 1) % 500 == 0:
             logging.info("  measured %d/%d", count + 1, len(test_indices))
     flush_cnn()
@@ -153,6 +145,18 @@ def main():
         g = np.array(gt[name])
         c = np.array(cnn_pred[name])
         d = np.array(det_pred[name])
+
+        if name in CATEGORICAL_ATTRS:
+            spec = specs[name]
+            true_class = spec.normalize(torch.from_numpy(g).float()).numpy()
+            pred_class = spec.normalize(torch.from_numpy(c).float()).numpy()  # c is already bin-center-decoded
+            acc = float((pred_class == true_class).mean())
+            macro_f1 = float(f1_score(true_class, pred_class, average="macro", zero_division=0))
+            results[name] = {"tier": "classification", "accuracy": acc, "macro_f1": macro_f1,
+                             "num_classes": spec.num_bins, "n": len(g)}
+            logging.info("%-20s accuracy=%.4f macro_f1=%.4f (%d classes)", name, acc, macro_f1, spec.num_bins)
+            continue
+
         if name in CIRCULAR:
             cnn_err = circular_error(c, g, CIRCULAR[name])
             det_err = circular_error(d, g, CIRCULAR[name]) if not np.isnan(d).all() else None
@@ -160,8 +164,7 @@ def main():
             cnn_err = np.abs(c - g)
             det_err = np.abs(d - g) if not np.isnan(d).all() else None
         results[name] = {
-            "tier": ("no_baseline" if DETERMINISTIC_KEY[name] is None and name != "scale" else
-                    "calibrated_baseline" if name == "scale" else "direct"),
+            "tier": "calibrated_baseline" if name == "scale" else "direct",
             "cnn_mae": float(cnn_err.mean()), "cnn_mae_std": float(cnn_err.std()),
             "deterministic_mae": float(det_err.mean()) if det_err is not None else None,
             "deterministic_mae_std": float(det_err.std()) if det_err is not None else None,

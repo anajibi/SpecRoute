@@ -86,7 +86,14 @@ def sample_from_spec(rng: np.random.RandomState, spec: dict) -> float:
         return float(np.exp(rng.uniform(np.log(p["low"]), np.log(p["high"]))))
     if dist == "constant":
         return float(p["value"])
-    raise ValueError(f"unknown distribution {dist!r} (expected uniform/normal/loguniform/constant)")
+    if dist == "discrete_bins":
+        # Uniform over `num_bins` fixed bin-center values spanning [low, high) -- not a continuous
+        # uniform. Used so a downstream classifier's bin edges land exactly on generated values
+        # (no residual intra-class variation from a value sampled anywhere within its bin).
+        num_bins = int(p["num_bins"])
+        centers = p["low"] + (np.arange(num_bins) + 0.5) * (p["high"] - p["low"]) / num_bins
+        return float(rng.choice(centers))
+    raise ValueError(f"unknown distribution {dist!r} (expected uniform/normal/loguniform/constant/discrete_bins)")
 
 
 def measure_thickness(gray_u8: np.ndarray) -> float:

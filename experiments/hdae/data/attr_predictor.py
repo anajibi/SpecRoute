@@ -43,38 +43,63 @@ class AttrSpec:
     on MSE in that space, which has no discontinuity at the wrap point) and
     decoded back to the original units via atan2. `period` is the wrap
     period (1.0 for hue, 2*pi for a radian phase).
+
+    `kind="categorical"`: `[lo, hi)` is divided into `num_bins` equal-width
+    bins and treated as a classification problem (cross-entropy over bin
+    logits), not a regression. Use when the regression loss landscape is
+    the actual problem -- e.g. an angle confounded with unrelated shape
+    variation, where MSE rewards hedging toward the mean more than it
+    rewards getting individual examples right. Decoded back to raw units
+    as the predicted bin's center, `lo + (argmax + 0.5) * (hi-lo)/num_bins`.
     """
     name: str
-    kind: str  # "scalar" | "circular"
+    kind: str  # "scalar" | "circular" | "categorical"
     lo: Optional[float] = None
     hi: Optional[float] = None
     period: Optional[float] = None
+    num_bins: Optional[int] = None
 
     def __post_init__(self):
         if self.kind == "scalar" and (self.lo is None or self.hi is None):
             raise ValueError(f"AttrSpec {self.name!r}: kind='scalar' needs lo/hi")
         if self.kind == "circular" and self.period is None:
             raise ValueError(f"AttrSpec {self.name!r}: kind='circular' needs period")
-        if self.kind not in ("scalar", "circular"):
+        if self.kind == "categorical" and (self.lo is None or self.hi is None or not self.num_bins):
+            raise ValueError(f"AttrSpec {self.name!r}: kind='categorical' needs lo/hi/num_bins")
+        if self.kind not in ("scalar", "circular", "categorical"):
             raise ValueError(f"AttrSpec {self.name!r}: unknown kind {self.kind!r}")
 
     @property
     def output_dim(self) -> int:
-        return 1 if self.kind == "scalar" else 2
+        if self.kind == "scalar":
+            return 1
+        if self.kind == "circular":
+            return 2
+        return self.num_bins
 
     def normalize(self, raw: torch.Tensor) -> torch.Tensor:
-        """raw value(s), shape (B,) -> network target space, shape (B, output_dim):
-        scalar: [-1,1] in a trailing singleton dim; circular: (sin,cos)."""
+        """raw value(s), shape (B,) -> network target space:
+        scalar: [-1,1] float, shape (B,1). circular: (sin,cos) float, shape (B,2).
+        categorical: bin index, LongTensor shape (B,) (for F.cross_entropy, not one-hot)."""
         if self.kind == "scalar":
             unit = (2.0 * (raw - self.lo) / (self.hi - self.lo) - 1.0).clamp(-1.0, 1.0)
             return unit.unsqueeze(-1)
+        if self.kind == "categorical":
+            frac = (raw - self.lo) / (self.hi - self.lo)
+            return (frac * self.num_bins).long().clamp(0, self.num_bins - 1)
         angle = raw * (2 * torch.pi / self.period)
         return torch.stack([torch.sin(angle), torch.cos(angle)], dim=-1)
 
     def denormalize(self, pred: torch.Tensor) -> torch.Tensor:
-        """network output, shape (B, output_dim) -> raw units, shape (B,). Inverse of `normalize`."""
+        """network output -> raw units, shape (B,). Inverse of `normalize`.
+        scalar/circular: pred is (B, output_dim) float (network output).
+        categorical: pred is (B, num_bins) logits -- decoded via argmax, not softmax-expectation,
+        so the reported value is what the network actually committed to, not a hedge."""
         if self.kind == "scalar":
             return (pred.squeeze(-1).clamp(-1.0, 1.0) + 1.0) / 2.0 * (self.hi - self.lo) + self.lo
+        if self.kind == "categorical":
+            bin_idx = pred.argmax(dim=-1).float()
+            return self.lo + (bin_idx + 0.5) * (self.hi - self.lo) / self.num_bins
         angle = torch.atan2(pred[..., 0], pred[..., 1])
         return (angle % (2 * torch.pi)) * (self.period / (2 * torch.pi))
 
@@ -193,7 +218,10 @@ class AttrRegressionModule(pl.LightningModule):
         raw_target = batch["attr"][:, self.attr_col].float()
         target = self.spec.normalize(raw_target)
         pred = self.model(batch["img"])
-        loss = F.mse_loss(pred, target)
+        if self.spec.kind == "categorical":
+            loss = F.cross_entropy(pred, target)
+        else:
+            loss = F.mse_loss(pred, target)
         return loss, pred, raw_target
 
     def training_step(self, batch, batch_idx):
@@ -211,6 +239,10 @@ class AttrRegressionModule(pl.LightningModule):
             err = (pred_raw - raw_target).abs()
         self.log("val_loss", loss, on_step=False, on_epoch=True, prog_bar=True, batch_size=batch["img"].shape[0])
         self.log("val_mae_raw", err.mean(), on_step=False, on_epoch=True, prog_bar=True, batch_size=batch["img"].shape[0])
+        if self.spec.kind == "categorical":
+            target = self.spec.normalize(raw_target)
+            acc = (pred.argmax(dim=-1) == target).float().mean()
+            self.log("val_acc", acc, on_step=False, on_epoch=True, prog_bar=True, batch_size=batch["img"].shape[0])
         return loss
 
     def configure_optimizers(self):

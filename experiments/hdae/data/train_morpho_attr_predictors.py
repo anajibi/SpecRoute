@@ -35,8 +35,21 @@ logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(m
 
 # name -> "circular" with a period, everything else defaults to "scalar"
 CIRCULAR_ATTRS = {"hue": 1.0, "bg_phase": 2 * np.pi}
+# rotation/slant: classification over fixed +/-45deg bins instead of MSE regression -- MSE rewards
+# hedging toward the mean on an attribute this confounded with unrelated digit shape (see
+# PROGRESS-SUMMARY / commit log: regression plateaued at ~0.55-0.57x the naive-mean baseline even
+# after regularization + wider capacity). Fixed range (not empirical, unlike every other scalar
+# attribute here) because bin edges need to be stable/interpretable, not fitted to this run's data.
+CATEGORICAL_ATTRS = {
+    "rotation": (-45.0, 45.0, 20), "slant": (-45.0, 45.0, 20),
+    # digit: 10 exact classes (bin width 1.0, centers land on 0..9), not a proxy binning of a
+    # continuous quantity like rotation/slant -- but the same AttrSpec(kind="categorical")
+    # machinery applies directly. No closed-form baseline exists for this one either (same as
+    # rotation/slant): measure_morphomnist.py excludes it for exactly this reason.
+    "digit": (-0.5, 9.5, 10),
+}
 TARGET_ATTRS = ["thickness", "intensity", "hue", "slant", "rotation", "scale",
-                "translate_x", "translate_y", "bg_freq", "bg_phase", "bg_amplitude", "texture_amplitude"]
+                "translate_x", "translate_y", "bg_freq", "bg_phase", "bg_amplitude", "texture_amplitude", "digit"]
 RANGE_PAD_FRAC = 0.02  # small headroom beyond the observed min/max so edge samples don't sit exactly at +/-1
 
 
@@ -48,6 +61,10 @@ def build_specs(ds: MorphoMNISTPacked, train_indices: np.ndarray) -> dict:
         col = ds.attribute_names.index(name)
         if name in CIRCULAR_ATTRS:
             specs[name] = AttrSpec(name=name, kind="circular", period=CIRCULAR_ATTRS[name])
+            continue
+        if name in CATEGORICAL_ATTRS:
+            lo, hi, num_bins = CATEGORICAL_ATTRS[name]
+            specs[name] = AttrSpec(name=name, kind="categorical", lo=lo, hi=hi, num_bins=num_bins)
             continue
         values = ds.attrs[train_indices, col]
         lo, hi = float(values.min()), float(values.max())
@@ -124,8 +141,13 @@ def main():
         for name in targets:
             spec = specs[name]
             col = ds.attribute_names.index(name)
-            logging.info("=== training predictor for %r (kind=%s%s) ===", name, spec.kind,
-                        f", range=[{spec.lo:.3f},{spec.hi:.3f}]" if spec.kind == "scalar" else f", period={spec.period:.4f}")
+            if spec.kind == "scalar":
+                detail = f", range=[{spec.lo:.3f},{spec.hi:.3f}]"
+            elif spec.kind == "categorical":
+                detail = f", range=[{spec.lo:.3f},{spec.hi:.3f}], num_bins={spec.num_bins}"
+            else:
+                detail = f", period={spec.period:.4f}"
+            logging.info("=== training predictor for %r (kind=%s%s) ===", name, spec.kind, detail)
             best_ckpt = train_attr_predictor(
                 spec=spec, attr_col=col,
                 train_dataset=Subset(ds, train_indices.tolist()), val_dataset=Subset(ds, val_indices.tolist()),
