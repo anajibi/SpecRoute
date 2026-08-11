@@ -66,34 +66,50 @@ def load_factor_config(path: str = DEFAULT_FACTOR_CONFIG_PATH) -> dict:
         raise ValueError(f"{path}: canvas_size={img['canvas_size']} must equal "
                          f"digit_size + 2*pad = {expected}")
     required = [n for n in UNOBSERVED_ATTRS if n != "texture_seed"] + \
-        ["thickness", "intensity_base", "intensity_noise", "hue"]
+        ["thickness", "intensity_noise", "hue"]
     missing = [n for n in required if n not in config["factors"]]
     if missing:
         raise ValueError(f"{path}: missing factor specs for {missing}")
-    if "intensity_thickness_gain" not in config:
-        raise ValueError(f"{path}: missing top-level intensity_thickness_gain")
+    missing_formula = [k for k in ("scale", "noise_coef", "thickness_coef", "bias", "floor")
+                       if k not in config.get("intensity_formula", {})]
+    if missing_formula:
+        raise ValueError(f"{path}: missing intensity_formula.{{{','.join(missing_formula)}}}")
     return config
 
 
 def sample_from_spec(rng: np.random.RandomState, spec: dict) -> float:
+    """`spec["offset"]`, if present, is added to the sampled value regardless of distribution --
+    e.g. thickness's `t := 0.5 + Gamma(10,5)` (Pawlowski et al. 2020) is `distribution: gamma` with
+    `offset: 0.5`, not a distribution of its own."""
     dist = spec["distribution"]
     p = spec.get("params", {})
     if dist == "uniform":
-        return float(rng.uniform(p["low"], p["high"]))
-    if dist == "normal":
-        return float(rng.normal(p.get("mean", 0.0), p.get("std", 1.0)))
-    if dist == "loguniform":
-        return float(np.exp(rng.uniform(np.log(p["low"]), np.log(p["high"]))))
-    if dist == "constant":
-        return float(p["value"])
-    if dist == "discrete_bins":
+        val = rng.uniform(p["low"], p["high"])
+    elif dist == "normal":
+        val = rng.normal(p.get("mean", 0.0), p.get("std", 1.0))
+    elif dist == "loguniform":
+        val = np.exp(rng.uniform(np.log(p["low"]), np.log(p["high"])))
+    elif dist == "constant":
+        val = p["value"]
+    elif dist == "gamma":
+        # numpy's gamma() takes (shape, scale); the literature convention here is (shape, rate),
+        # scale = 1/rate.
+        val = rng.gamma(p["shape"], scale=1.0 / p["rate"])
+    elif dist == "discrete_bins":
         # Uniform over `num_bins` fixed bin-center values spanning [low, high) -- not a continuous
         # uniform. Used so a downstream classifier's bin edges land exactly on generated values
         # (no residual intra-class variation from a value sampled anywhere within its bin).
         num_bins = int(p["num_bins"])
         centers = p["low"] + (np.arange(num_bins) + 0.5) * (p["high"] - p["low"]) / num_bins
-        return float(rng.choice(centers))
-    raise ValueError(f"unknown distribution {dist!r} (expected uniform/normal/loguniform/constant/discrete_bins)")
+        val = rng.choice(centers)
+    else:
+        raise ValueError(f"unknown distribution {dist!r} "
+                         "(expected uniform/normal/loguniform/constant/gamma/discrete_bins)")
+    return float(val + spec.get("offset", 0.0))
+
+
+def _sigmoid(z: np.ndarray) -> np.ndarray:
+    return 1.0 / (1.0 + np.exp(-z))
 
 
 def measure_thickness(gray_u8: np.ndarray) -> float:
@@ -228,12 +244,11 @@ class Factors:
     bg_amplitude: float
     texture_seed: int
     texture_amplitude: float
-    # Not part of ATTRIBUTE_NAMES / the logged record -- generation-time-only components so
-    # render() can compute intensity's target from thickness's *achieved* value (see render()'s
-    # docstring for why: the requested thickness target and what morphology actually achieves can
-    # diverge, and computing intensity from the request rather than the outcome breaks the causal
-    # link for every image where they diverge).
-    intensity_base: float = 0.0
+    # Not part of ATTRIBUTE_NAMES / the logged record -- generation-time-only so render() can
+    # compute intensity's target from thickness's *achieved* value (see render()'s docstring for
+    # why: the requested thickness target and what morphology actually achieves can diverge, and
+    # computing intensity from the request rather than the outcome breaks the causal link for
+    # every image where they diverge). This is `eps_I` in Pawlowski et al. 2020's SCM formula.
     intensity_noise: float = 0.0
 
     def to_vector(self) -> np.ndarray:
@@ -250,14 +265,16 @@ class Factors:
 def sample_targets(index: int, digit: int, config: dict) -> Dict[str, float]:
     """Deterministic per-index sampling of *requested* factor values (thickness/intensity are
     targets the renderer then measures and corrects for -- see ``render()``), per the
-    distributions declared in ``config`` (``load_factor_config``)."""
+    distributions declared in ``config`` (``load_factor_config``).
+
+    thickness/intensity follow Pawlowski, Castro & Glocker 2020 ("Deep Structural Causal Models
+    for Tractable Counterfactual Inference"): t := 0.5 + Gamma(10,5), i := 191*sigmoid(0.5*eps_I +
+    2*t - 5) + 64, eps_I ~ N(0,1). `intensity_noise` sampled here is eps_I; the actual intensity
+    formula runs in render() against thickness's *achieved* value, not this requested one."""
     rng = np.random.RandomState(seed=index)
     f = config["factors"]
-    gain = float(config["intensity_thickness_gain"])
     thickness_target = sample_from_spec(rng, f["thickness"])
-    intensity_base = sample_from_spec(rng, f["intensity_base"])
     intensity_noise = sample_from_spec(rng, f["intensity_noise"])
-    intensity_target = intensity_base - gain * thickness_target + intensity_noise
     hue = sample_from_spec(rng, f["hue"])
     slant = sample_from_spec(rng, f["slant"])
     rotation = sample_from_spec(rng, f["rotation"])
@@ -269,10 +286,10 @@ def sample_targets(index: int, digit: int, config: dict) -> Dict[str, float]:
     bg_amplitude = sample_from_spec(rng, f["bg_amplitude"])
     texture_seed = int(rng.randint(0, 2 ** 31 - 1))
     texture_amplitude = sample_from_spec(rng, f["texture_amplitude"])
-    return dict(digit=digit, thickness=thickness_target, intensity=intensity_target, hue=hue, slant=slant,
+    return dict(digit=digit, thickness=thickness_target, intensity=0.0, hue=hue, slant=slant,
                rotation=rotation, scale=scale, translate_x=tx, translate_y=ty, bg_freq=bg_freq,
                bg_phase=bg_phase, bg_amplitude=bg_amplitude, texture_seed=texture_seed,
-               texture_amplitude=texture_amplitude, intensity_base=intensity_base, intensity_noise=intensity_noise)
+               texture_amplitude=texture_amplitude, intensity_noise=intensity_noise)
 
 
 def render(base_digit_u8: np.ndarray, factors: Factors, config: dict, measure: bool = True
@@ -286,19 +303,22 @@ def render(base_digit_u8: np.ndarray, factors: Factors, config: dict, measure: b
     re-rendering from an already-measured record (round-trip check) --
     ``config`` is unused in that path (kept for a uniform call signature).
 
-    When ``measure`` is True, intensity's target is recomputed from
-    thickness's *achieved* value (via ``factors.intensity_base``/
-    ``intensity_noise`` and ``config["intensity_thickness_gain"]``), not the
-    originally requested ``factors.thickness`` -- morphology's vanish-guard
-    (``_set_thickness``) can leave the achieved value well short of a
-    hard-to-reach request, and computing intensity from the request rather
-    than the outcome breaks the causal link on every image where they diverge.
+    When ``measure`` is True, intensity's target is computed from thickness's
+    *achieved* value (Pawlowski et al. 2020's formula, via ``factors.intensity_noise``
+    and ``config["intensity_formula"]``), not the originally requested
+    ``factors.thickness`` -- morphology's vanish-guard (``_set_thickness``)
+    can leave the achieved value well short of a hard-to-reach request, and
+    computing intensity from the request rather than the outcome breaks the
+    causal link on every image where they diverge.
     """
     gray = _set_thickness(base_digit_u8, factors.thickness)
     achieved_thickness = measure_thickness(gray) if measure else factors.thickness
-    gain = float(config["intensity_thickness_gain"]) if measure else 0.0
-    intensity_target = (factors.intensity_base - gain * achieved_thickness
-                        + factors.intensity_noise) if measure else factors.intensity
+    if measure:
+        ifm = config["intensity_formula"]
+        z = ifm["noise_coef"] * factors.intensity_noise + ifm["thickness_coef"] * achieved_thickness + ifm["bias"]
+        intensity_target = ifm["scale"] * _sigmoid(z) + ifm["floor"]
+    else:
+        intensity_target = factors.intensity
     gray = _set_intensity(gray, intensity_target)
     achieved_intensity = measure_intensity(gray) if measure else factors.intensity
 

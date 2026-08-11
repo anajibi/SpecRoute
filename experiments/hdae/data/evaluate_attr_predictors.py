@@ -152,9 +152,22 @@ def main():
             pred_class = spec.normalize(torch.from_numpy(c).float()).numpy()  # c is already bin-center-decoded
             acc = float((pred_class == true_class).mean())
             macro_f1 = float(f1_score(true_class, pred_class, average="macro", zero_division=0))
-            results[name] = {"tier": "classification", "accuracy": acc, "macro_f1": macro_f1,
-                             "num_classes": spec.num_bins, "n": len(g)}
-            logging.info("%-20s accuracy=%.4f macro_f1=%.4f (%d classes)", name, acc, macro_f1, spec.num_bins)
+            entry = {"tier": "classification", "accuracy": acc, "macro_f1": macro_f1,
+                    "num_classes": spec.num_bins, "n": len(g),
+                    "deterministic_accuracy": None, "deterministic_macro_f1": None}
+            key = DETERMINISTIC_KEY[name]
+            if key is not None:
+                # A real closed-form estimator exists for this attribute (e.g. translate_x/y's
+                # centroid) -- bin its continuous output into the same classes so the comparison
+                # survives the switch to classification instead of silently disappearing.
+                det_class = spec.normalize(torch.from_numpy(d).float()).numpy()
+                entry["deterministic_accuracy"] = float((det_class == true_class).mean())
+                entry["deterministic_macro_f1"] = float(f1_score(true_class, det_class, average="macro",
+                                                                  zero_division=0))
+            results[name] = entry
+            logging.info("%-20s accuracy=%.4f macro_f1=%.4f (%d classes) deterministic_accuracy=%s",
+                        name, acc, macro_f1, spec.num_bins,
+                        f"{entry['deterministic_accuracy']:.4f}" if key is not None else "n/a")
             continue
 
         if name in CIRCULAR:

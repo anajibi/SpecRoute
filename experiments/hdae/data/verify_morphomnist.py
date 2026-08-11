@@ -72,12 +72,14 @@ def main():
                  len(train_indices))
 
     # 2. thickness/intensity causal link is really in the pixels, not just metadata.
+    # Positive correlation: Pawlowski et al. 2020's formula has i = scale*sigmoid(...+ thickness_coef*t +
+    # ...)+floor with thickness_coef > 0, so thicker strokes render brighter.
     thickness = ds.attrs[:, ds.attribute_names.index("thickness")]
     intensity = ds.attrs[:, ds.attribute_names.index("intensity")]
     corr = float(np.corrcoef(thickness, intensity)[0, 1])
     logging.info("thickness/intensity Pearson correlation in packed data: %.4f", corr)
-    assert corr < -0.3, f"expected a real negative thickness->intensity correlation, got {corr:.4f}"
-    logging.info("PASS: thickness->intensity causal link is present and negative as designed")
+    assert corr > 0.3, f"expected a real positive thickness->intensity correlation, got {corr:.4f}"
+    logging.info("PASS: thickness->intensity causal link is present and positive as designed")
 
     # 3. hue independence: changing hue leaves the digit's spatial footprint untouched.
     idx = int(train_indices[0])

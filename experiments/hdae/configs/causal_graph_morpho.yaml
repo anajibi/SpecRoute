@@ -15,10 +15,10 @@ nodes:
     num_classes: 10
   thickness:
     kind: continuous
-    range: [1.0, 7.5]      # px; empirical packed-data range is [2.0, 6.8], padded for headroom
+    range: [1.0, 8.0]      # px; Pawlowski et al. 2020 formula (t=0.5+Gamma(10,5)); empirical range [2.0, 6.6], padded
   intensity:
     kind: continuous
-    range: [20.0, 220.0]   # 0-255 gray level; empirical range is [37, 201], padded
+    range: [60.0, 256.0]   # 0-255 gray level; Pawlowski et al. 2020 formula bounds it to (64,255); empirical [83, 251]
   hue:
     kind: continuous
     range: [0.0, 1.0]

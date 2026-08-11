@@ -13,44 +13,52 @@ image:
   canvas_size: 64   # must equal digit_size + 2*pad -- checked at load time, not just documentation
 
 # distribution: uniform {low, high} | normal {mean, std} | loguniform {low, high} | constant {value}
+#             | gamma {shape, rate} | discrete_bins {low, high, num_bins}
+# `offset`, if present on any spec, is added to the sampled value regardless of distribution.
 factors:
   # --- modeled (SCM nodes: causal_graph_morpho.yaml) ---
+  # thickness/intensity follow Pawlowski, Castro & Glocker 2020 ("Deep Structural Causal Models
+  # for Tractable Counterfactual Inference"): t := 0.5 + Gamma(10,5); i := 191*sigmoid(0.5*eps_I +
+  # 2*t - 5) + 64, eps_I ~ N(0,1) (see intensity_formula below and render()'s intensity step --
+  # eps_I is `intensity_noise` here, sampled but not itself the intensity).
   thickness:
-    distribution: uniform
-    params: {low: 1.2, high: 4.0}          # px, average stroke half-width * 2 (unaffected by canvas size)
-  intensity_base:
-    distribution: uniform
-    params: {low: 140.0, high: 220.0}      # 0-255 mean foreground gray level before the thickness effect
+    distribution: gamma
+    params: {shape: 10.0, rate: 5.0}
+    offset: 0.5                            # px, average stroke half-width * 2
   intensity_noise:
     distribution: normal
-    params: {mean: 0.0, std: 5.0}
+    params: {mean: 0.0, std: 1.0}          # eps_I
   hue:
     distribution: uniform
     params: {low: 0.0, high: 1.0}
 
   # --- injected, unobserved (logged, outside the causal graph) ---
-  # Ranges widened from the 32x32 canvas's originals now that there's real margin (previously
-  # 2px padding around a 28px digit left almost no room; 18px padding on a 64px canvas does).
-  # discrete_bins (not uniform): the predictor for these two is a 20-way classifier
-  # (data/train_morpho_attr_predictors.py CATEGORICAL_ATTRS), and generating a continuous angle
+  # rotation/slant narrowed from an earlier +/-45deg (visually confirmed to sometimes destroy a
+  # digit's identifying topology -- e.g. an "8" rendered as a single diagonal stroke with no
+  # loops -- capping both digit and rotation/slant classification accuracy independent of
+  # training). +/-30deg keeps real, observable variation without that failure mode.
+  # discrete_bins (not uniform): the predictor for these is a 20-way classifier
+  # (data/train_morpho_attr_predictors.py CATEGORICAL_ATTRS), and generating a continuous value
   # anywhere within a bin -- rather than exactly at its center -- leaves real intra-class pixel
   # variation the classifier can't resolve even in principle. Sampling only the 20 bin centers
   # removes that residual ambiguity; range/bin-count here MUST match CATEGORICAL_ATTRS exactly.
   slant:
     distribution: discrete_bins
-    params: {low: -45.0, high: 45.0, num_bins: 20}   # degrees, shear
+    params: {low: -30.0, high: 30.0, num_bins: 20}   # degrees, shear
   rotation:
     distribution: discrete_bins
-    params: {low: -45.0, high: 45.0, num_bins: 20}   # degrees
+    params: {low: -30.0, high: 30.0, num_bins: 20}   # degrees
   scale:
     distribution: uniform
-    params: {low: 0.7, high: 1.4}
+    params: {low: 0.85, high: 1.2}         # narrowed from 0.7-1.4, same rationale as rotation/slant
+  # discrete_bins, same rationale as slant/rotation above: translate_x/y are now 20-way
+  # classifiers too, so generated values land exactly on the 20 bin centers.
   translate_x:
-    distribution: uniform
-    params: {low: -10.0, high: 10.0}       # px
+    distribution: discrete_bins
+    params: {low: -10.0, high: 10.0, num_bins: 20}   # px
   translate_y:
-    distribution: uniform
-    params: {low: -10.0, high: 10.0}       # px
+    distribution: discrete_bins
+    params: {low: -10.0, high: 10.0, num_bins: 20}   # px
   bg_freq:
     distribution: uniform
     params: {low: 1.0, high: 4.0}          # cycles across the canvas
@@ -66,7 +74,14 @@ factors:
   # texture_seed is a per-image random integer (the noise pattern's seed), not a physical
   # quantity with a meaningful distribution -- sampled directly, not through this table.
 
-# Fixed causal-strength coefficient for thickness -> intensity (not a per-image distribution --
-# a single number shared by every image, like causal_graph.yaml's logit_smoothing_eps).
-# intensity_target = intensity_base - intensity_thickness_gain * achieved_thickness + intensity_noise
-intensity_thickness_gain: 22.0
+# Fixed thickness -> intensity structural equation (Pawlowski et al. 2020), shared by every
+# image -- not a per-image distribution, like causal_graph.yaml's logit_smoothing_eps.
+# intensity = scale * sigmoid(noise_coef*eps_I + thickness_coef*achieved_thickness + bias) + floor
+# Thicker strokes render BRIGHTER under this formula (positive thickness_coef) -- the opposite
+# sign from this file's original ad-hoc linear formula, which had thicker = dimmer.
+intensity_formula:
+  scale: 191.0
+  noise_coef: 0.5
+  thickness_coef: 2.0
+  bias: -5.0
+  floor: 64.0

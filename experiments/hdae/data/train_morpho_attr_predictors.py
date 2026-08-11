@@ -41,7 +41,8 @@ CIRCULAR_ATTRS = {"hue": 1.0, "bg_phase": 2 * np.pi}
 # after regularization + wider capacity). Fixed range (not empirical, unlike every other scalar
 # attribute here) because bin edges need to be stable/interpretable, not fitted to this run's data.
 CATEGORICAL_ATTRS = {
-    "rotation": (-45.0, 45.0, 20), "slant": (-45.0, 45.0, 20),
+    "rotation": (-30.0, 30.0, 20), "slant": (-30.0, 30.0, 20),
+    "translate_x": (-10.0, 10.0, 20), "translate_y": (-10.0, 10.0, 20),
     # digit: 10 exact classes (bin width 1.0, centers land on 0..9), not a proxy binning of a
     # continuous quantity like rotation/slant -- but the same AttrSpec(kind="categorical")
     # machinery applies directly. No closed-form baseline exists for this one either (same as
