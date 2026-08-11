@@ -44,7 +44,7 @@ factors:
   # removes that residual ambiguity; range/bin-count here MUST match CATEGORICAL_ATTRS exactly.
   slant:
     distribution: discrete_bins
-    params: {low: -30.0, high: 30.0, num_bins: 20}   # degrees, shear
+    params: {low: -30.0, high: 30.0, num_bins: 10}   # degrees, shear -- coarser than rotation's 20 bins
   rotation:
     distribution: discrete_bins
     params: {low: -30.0, high: 30.0, num_bins: 20}   # degrees

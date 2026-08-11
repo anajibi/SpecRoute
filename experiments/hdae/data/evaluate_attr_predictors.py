@@ -48,6 +48,12 @@ DETERMINISTIC_KEY = {
     "scale": None,  # calibrated separately below (fitted linear proxy, not in measure_all)
 }
 CIRCULAR = {"hue": 1.0, "bg_phase": 2 * np.pi}
+# Categorical attrs whose classes have a real ordering (bin 5 is "close to" bin 6) -- exact-bin
+# accuracy alone understates these badly (a 1-bin miss scores identically to a 19-bin miss), so
+# also report MAE in original units via the bin-center-decoded prediction. Digit is NOT ordinal
+# in the relevant sense (misclassifying 6 as 8 isn't "closer" than misclassifying it as 0) and is
+# excluded.
+ORDINAL_CATEGORICAL = {"rotation", "slant", "translate_x", "translate_y"}
 
 
 def to_rgb_u8(img_tensor: torch.Tensor) -> np.ndarray:
@@ -153,8 +159,14 @@ def main():
             acc = float((pred_class == true_class).mean())
             macro_f1 = float(f1_score(true_class, pred_class, average="macro", zero_division=0))
             entry = {"tier": "classification", "accuracy": acc, "macro_f1": macro_f1,
-                    "num_classes": spec.num_bins, "n": len(g),
-                    "deterministic_accuracy": None, "deterministic_macro_f1": None}
+                    "num_classes": spec.num_bins, "n": len(g), "ordinal": name in ORDINAL_CATEGORICAL,
+                    "deterministic_accuracy": None, "deterministic_macro_f1": None,
+                    "cnn_mae": None, "deterministic_mae": None, "within_1_bin": None, "within_2_bin": None}
+            if name in ORDINAL_CATEGORICAL:
+                bin_off = np.abs(pred_class - true_class)
+                entry["cnn_mae"] = float(np.abs(c - g).mean())
+                entry["within_1_bin"] = float((bin_off <= 1).mean())
+                entry["within_2_bin"] = float((bin_off <= 2).mean())
             key = DETERMINISTIC_KEY[name]
             if key is not None:
                 # A real closed-form estimator exists for this attribute (e.g. translate_x/y's
@@ -164,9 +176,12 @@ def main():
                 entry["deterministic_accuracy"] = float((det_class == true_class).mean())
                 entry["deterministic_macro_f1"] = float(f1_score(true_class, det_class, average="macro",
                                                                   zero_division=0))
+                if name in ORDINAL_CATEGORICAL:
+                    entry["deterministic_mae"] = float(np.abs(d - g).mean())
             results[name] = entry
-            logging.info("%-20s accuracy=%.4f macro_f1=%.4f (%d classes) deterministic_accuracy=%s",
+            logging.info("%-20s accuracy=%.4f macro_f1=%.4f (%d classes) cnn_mae=%s deterministic_accuracy=%s",
                         name, acc, macro_f1, spec.num_bins,
+                        f"{entry['cnn_mae']:.4f}" if entry["cnn_mae"] is not None else "n/a",
                         f"{entry['deterministic_accuracy']:.4f}" if key is not None else "n/a")
             continue
 
