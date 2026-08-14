@@ -1,4 +1,4 @@
-aright# TODO-List progress summary
+# TODO-List progress summary
 
 (See `TODO-List` at repo root for full detail per item; this is the short version.)
 
@@ -24,13 +24,59 @@ aright# TODO-List progress summary
   rather than sitting alongside it. Landed together with item 2 since the
   redefinition needed the causal graph to mean anything.
 
+- **Item 3 — MorphoMNIST dataset, causal graph, and HDAE training.** MorphoMNIST++
+  dataset (140k images, digit/thickness/intensity/hue modeled + 10 unobserved
+  factors logged) and its causal graph/SCM (`causal_graph_morpho.yaml`,
+  `morpho_scm.pt`) built in an earlier pass. **This pass (2026-08-11):**
+  generalized the HDAE conditioning path (previously binary-only) to support
+  MorphoMNIST's mixed categorical (digit) + continuous (thickness/intensity/hue)
+  attributes — new `MixedAttributeEmbedding`, mask-based CFG null (fixed a real
+  bug: the old binary "null" trick silently corrupted continuous conditioning),
+  a new MorphoMNIST datamodule, and three new `morpho_hier_k{1,5,11}.yaml`
+  configs. Training launched for all three k-variants; CF1 (item 4's
+  CelebA-specific eval harness) was **not** ported — judged out of proportion
+  to the time available, see `TODO-List` item 3 for the reasoning and the
+  lighter substitute (`morpho_cf_smoketest.py`) built instead. Full decisions
+  list and status are in `TODO-List` item 3's second-pass section — this file
+  only tracks top-level done/not-done, not the reasoning.
+
+- **Item 3, continued (2026-08-11 to 2026-08-14).** Dataset finalized as
+  `morphomnist_70k.h5` (rotation narrowed to 5-bin ±45°, slant dropped, hue
+  changed continuous → categorical 10-bin); all attribute predictors
+  retrained, top-k accuracy added. Found and fixed a real bug (categorical
+  attributes whose raw storage isn't already the class index — hue —
+  getting truncated instead of binned) in three places: the trained
+  embedding module, the SCM's likelihood/counterfactual math, and three eval
+  scripts. **Found a fourth instance of the same bug on 2026-08-14, in the
+  training data path itself (`attr_utils.to_cond_values`) — not yet fixed.**
+  Every hue-conditioned checkpoint trained so far (`k1_v2`, `k11_v2`,
+  `k11_v3`) has invalid hue results as a result; digit/thickness/intensity
+  are unaffected. Also implemented (not yet validly evaluated, same reason):
+  `attr_fusion: concat_film`, an opt-in alternative to summed attribute
+  embeddings that gives each attribute a protected slice and FiLM-modulates
+  the style vector instead of concatenating into it, plus independent
+  per-attribute dropout (`attr_dropout_prob`). Full state, including the
+  fix-then-retrain plan, mirrored to
+  `s3://najibi-research-7f2a/hdae-handoff/HANDOFF.md` for continuation on
+  another server.
+
 ## Not done
 
 - **Item 2, follow-up:** the causal DAG itself is still empty — add real
   `[parent, child]` edges to `causal_graph.yaml` and re-run `train_scm.py`
-  whenever you're ready to make CC/FC-observed non-trivial.
-- **Item 3 — MorphoMNIST and Causal3DIdent datasets.** Not started. Flagged
-  as high-value to pull forward since both ship a *known* ground-truth causal
-  graph, which CelebA can't offer to validate item 2's DAG against.
+  whenever you're ready to make CC/FC-observed non-trivial. (MorphoMNIST's
+  *separate* graph, `causal_graph_morpho.yaml`, already has a real edge,
+  thickness -> intensity — this note is about the original CelebA graph only.)
+  Causal3DIdent (item 3): still not started.
+- **Item 3, follow-up:** CF1 eval harness not ported to MorphoMNIST (see
+  above); a batch-size-matched rerun to cleanly separate the k=1 reconstruction
+  confound from a true k effect (not needed for the counterfactual-editing
+  result, which points the opposite way from the confound — see `TODO-List`).
+  All three k-variants finished training (150,000 steps each) and were
+  evaluated: k=1 wins reconstruction but that's confounded with 2x the
+  training images; k=5/k=11 clearly win on counterfactual editing quality
+  (digit-swap accuracy 0.27 -> 0.53 -> 0.56 for k=1/5/11) and leakage control,
+  which is not explained by the confound. Full numbers in
+  `experiments/hdae/outputs/morpho_hier_k_comparison_report.md`.
 - **Item 5 — CheXpert.** Explicitly parked by you until 1–4 land; still
   parked.

@@ -23,6 +23,7 @@ from pytorch_lightning.loggers import TensorBoardLogger
 from experiments.hdae.hdae.config_io import load_hdae_config
 from experiments.hdae.hdae.lit_module import HDAELitModule
 from experiments.hdae.data.datamodule import CelebAHQDataModule
+from experiments.hdae.data.morpho_datamodule import MorphoMNISTDataModule
 
 
 # --- Execution Logic Encapsulated ---
@@ -39,13 +40,22 @@ def main():
     d = cfg.raw['data']
     t = cfg.raw['train']
 
-    dm = CelebAHQDataModule(
-        d['lmdb_path'],
-        d['attr_npz'],
-        t['batch_size_per_gpu'],
-        t['num_workers'],
-        d['flip_aug']
-    )
+    if d.get('type') == 'morphomnist':
+        dm = MorphoMNISTDataModule(
+            d['h5_path'],
+            t['batch_size_per_gpu'],
+            t['num_workers'],
+            val_frac=d.get('val_frac', 0.02),
+            preload_images=d.get('preload_images', True),
+        )
+    else:
+        dm = CelebAHQDataModule(
+            d['lmdb_path'],
+            d['attr_npz'],
+            t['batch_size_per_gpu'],
+            t['num_workers'],
+            d['flip_aug']
+        )
 
     out = Path(cfg.raw['output_dir'])
     out.mkdir(parents=True, exist_ok=True)

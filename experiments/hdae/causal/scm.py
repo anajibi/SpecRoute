@@ -161,6 +161,33 @@ class SCM(nn.Module):
         mu, log_sigma = mu_log_sigma[:, :1], mu_log_sigma[:, 1:]
         return mu, log_sigma.clamp(-5.0, 5.0)
 
+    def categorical_class_index(self, node: str, raw: torch.Tensor) -> torch.Tensor:
+        """raw attribute column (float, any shape) -> integer class index in [0, num_classes).
+
+        For nodes whose raw storage already IS the class index (e.g. digit: 0..9, no `range`
+        declared in the graph config -- lo/hi are None), this is just a cast, matching the
+        original behavior exactly. For nodes whose raw storage is a continuous-looking value that
+        still only takes a fixed set of values (e.g. hue: sampled from 10 fixed bin centers in
+        [0,1], `range: [0,1]` declared) -- min-max bin it via lo/hi instead of truncating, which
+        would silently collapse nearly all values into class 0 (found the hard way: `.long()` on
+        hue's 0.05-0.95 raw values always truncates to 0, so the pre-fix SCM's hue node was fit on
+        a target that was constant across the whole dataset -- a degenerate fit, not a real
+        10-way distribution)."""
+        spec = self.specs[node]
+        if spec.lo is None or spec.hi is None:
+            return raw.long()
+        frac = (raw - spec.lo) / (spec.hi - spec.lo)
+        return (frac * spec.num_classes).long().clamp(0, spec.num_classes - 1)
+
+    def class_index_to_raw(self, node: str, class_idx: torch.Tensor) -> torch.Tensor:
+        """Inverse of `categorical_class_index`: class index -> raw-units value (bin center for
+        nodes with `range` declared, or the class index itself, unchanged, for nodes without --
+        e.g. digit)."""
+        spec = self.specs[node]
+        if spec.lo is None or spec.hi is None:
+            return class_idx.float()
+        return spec.lo + (class_idx.float() + 0.5) * (spec.hi - spec.lo) / spec.num_classes
+
     def nll(self, attrs: torch.Tensor, attr_index: Dict[str, int]) -> torch.Tensor:
         """Mean joint negative log-likelihood of a batch of real attribute rows.
 
@@ -178,7 +205,7 @@ class SCM(nn.Module):
             context = self._context(node, z_by_node, batch_size, device)
             if spec.kind == "categorical":
                 logits = self.encoders[node](context)
-                target = attrs[:, attr_index[node]].long()
+                target = self.categorical_class_index(node, attrs[:, attr_index[node]])
                 total = total + F.cross_entropy(logits, target, reduction="mean")
             else:
                 total = total - self.flows[node].log_prob(z_by_node[node], context=context).mean()

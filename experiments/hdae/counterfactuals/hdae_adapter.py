@@ -1,7 +1,10 @@
 """CFModelAdapter for the conditioned per_block_attr HDAE (experiments/hdae/hdae/)."""
 import torch
 
-from experiments.hdae.hdae.attr_utils import to_index_space
+from experiments.hdae.hdae.attr_conditioner import ConcatAttributeEmbedding, MixedAttributeEmbedding
+
+_NULL_MASK_AWARE = (MixedAttributeEmbedding, ConcatAttributeEmbedding)
+from experiments.hdae.hdae.attr_utils import to_cond_values, to_index_space
 from experiments.hdae.hdae.config_io import load_hdae_config
 from experiments.hdae.hdae.lit_module import HDAELitModule
 
@@ -20,8 +23,14 @@ class AttributeCFGWrapper(torch.nn.Module):
         cond_out = self.base_model.forward(x=x, t=t, cond=cond, **kwargs)
         if self.guidance_scale == 1.0:
             return cond_out
-        y_null = torch.full_like(cond["y_idx"], 2)
-        null_cond = {"zs": cond["zs"], "y_idx": y_null}
+        if isinstance(self.base_model.attr_embedding, _NULL_MASK_AWARE):
+            # Continuous attrs have no reserved "null" value (unlike binary's spare index 2) --
+            # the unconditional pass is signalled via an explicit mask, not a magic input value.
+            null_mask = torch.ones_like(cond["y_idx"], dtype=torch.bool)
+            null_cond = {"zs": cond["zs"], "y_idx": cond["y_idx"], "null_mask": null_mask}
+        else:
+            y_null = torch.full_like(cond["y_idx"], 2)
+            null_cond = {"zs": cond["zs"], "y_idx": y_null}
         uncond_out = self.base_model.forward(x=x, t=t, cond=null_cond, **kwargs)
         guided = uncond_out.pred + self.guidance_scale * (cond_out.pred - uncond_out.pred)
         return cond_out.__class__(pred=guided, cond=cond)
@@ -31,11 +40,12 @@ class AttributeCFGWrapper(torch.nn.Module):
 class HDAEAdapter(CFModelAdapter):
     """``edit_strength`` is the attribute-CFG guidance scale (>= 1.0)."""
 
-    def __init__(self, module, modeled_attrs, attr_input_range, guidance_scale, T, device):
+    def __init__(self, module, modeled_attrs, attr_input_range, guidance_scale, T, device, cond_specs=None):
         self.module = module
         self.model = module.ema_model
         self.modeled_attrs = list(modeled_attrs)
         self._attr_input_range = attr_input_range
+        self._cond_specs = cond_specs
         self.guidance_scale = float(guidance_scale)
         self.edit_strength = self.guidance_scale
         self.T = T
@@ -52,8 +62,9 @@ class HDAEAdapter(CFModelAdapter):
             module.ema_model = torch.compile(module.ema_model)
         modeled_attrs = list(module.ema_model.hdae_conf.encoder.conditioning_attrs)
         attr_input_range = module.ema_model.hdae_conf.encoder.attr_input_range
+        cond_specs = module.ema_model.hdae_conf.encoder.cond_specs or None
         eval_T = T if T is not None else cfg.raw["train"]["T_eval"]
-        return cls(module, modeled_attrs, attr_input_range, guidance_scale, eval_T, device)
+        return cls(module, modeled_attrs, attr_input_range, guidance_scale, eval_T, device, cond_specs)
 
     def _sampler(self):
         if self.T is None:
@@ -74,7 +85,10 @@ class HDAEAdapter(CFModelAdapter):
     def encode(self, images, attrs_raw, attr_names) -> CFState:
         cond_indices = [attr_names.index(a) for a in self.modeled_attrs]
         y_raw = attrs_raw[:, cond_indices].to(self.device)
-        y_idx = to_index_space(y_raw, self._attr_input_range).to(self.device)
+        if self._cond_specs:
+            y_idx = to_cond_values(y_raw, self._cond_specs).to(self.device)
+        else:
+            y_idx = to_index_space(y_raw, self._attr_input_range).to(self.device)
         with torch.inference_mode():
             zs = [z.clone() for z in self.model.encode(images)]
             cond = self.model.make_cond(zs, y_idx)

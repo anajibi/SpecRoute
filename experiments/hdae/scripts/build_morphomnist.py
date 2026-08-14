@@ -23,6 +23,7 @@ a preview grid from the same config without writing the full dataset.
 """
 import argparse
 import logging
+import multiprocessing as mp
 import sys
 import time
 from pathlib import Path
@@ -41,24 +42,53 @@ logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(m
 
 IMAGE_CHUNK_ROWS = 256  # chunk along the batch dim so sequential batch reads are ~one chunk read
 
+_WORKER_CONFIG = None  # set once per worker process by _worker_init, avoids re-pickling per task
 
-def build_split_into(mnist_ds, config, index_offset, n, images_ds, attrs_ds, out_offset, log_every=10000):
+
+def _worker_init(config):
+    global _WORKER_CONFIG
+    _WORKER_CONFIG = config
+
+
+def _render_one(task):
+    """Runs in a worker process. task = (out_offset, global_index, digit, img_padded).
+    Pure CPU work (skimage morphology + affine warp) -- this is the actual bottleneck the
+    original sequential version paid for on every one of the 70k/140k images; only the render
+    itself is parallelized, HDF5 writes stay single-writer in the main process."""
+    out_offset, global_index, digit, img_padded = task
+    factors = Factors(**sample_targets(global_index, digit, _WORKER_CONFIG))
+    rgb, achieved = render(img_padded, factors, _WORKER_CONFIG)
+    return out_offset, rgb, achieved.to_vector()
+
+
+def build_split_into(mnist_ds, config, index_offset, n, images_ds, attrs_ds, out_offset,
+                     pool, log_every=10000):
     """`n` may exceed `len(mnist_ds)` -- base images then cycle (`i % len(mnist_ds)`), each repeat
     getting a genuinely different factor draw since `global_index` (used as the per-image RNG
-    seed) is never taken modulo the dataset length, only the base-image lookup is."""
+    seed) is never taken modulo the dataset length, only the base-image lookup is.
+
+    Padding (cheap) happens here in the main process, sequentially, since it needs the MNIST
+    dataset object; the expensive part (sample_targets + render, both pure CPU, no shared state)
+    is dispatched to the worker pool via imap_unordered -- each task carries its own absolute
+    output row, so results can be written back to the HDF5 datasets in whatever order they
+    finish, no reordering buffer needed."""
     t0 = time.time()
     n_base = len(mnist_ds)
-    for i in range(n):
-        img28, digit = mnist_ds[i % n_base]
-        img_padded = pad_digit(np.array(img28, dtype=np.uint8), config["image"]["pad"])
-        global_index = index_offset + i
-        factors = Factors(**sample_targets(global_index, int(digit), config))
-        rgb, achieved = render(img_padded, factors, config)
-        images_ds[out_offset + i] = rgb
-        attrs_ds[out_offset + i] = achieved.to_vector()
-        if (i + 1) % log_every == 0:
-            rate = (i + 1) / (time.time() - t0)
-            logging.info("  %d/%d (%.0f img/s)", i + 1, n, rate)
+
+    def tasks():
+        for i in range(n):
+            img28, digit = mnist_ds[i % n_base]
+            img_padded = pad_digit(np.array(img28, dtype=np.uint8), config["image"]["pad"])
+            yield (out_offset + i, index_offset + i, int(digit), img_padded)
+
+    done = 0
+    for out_idx, rgb, attr_vec in pool.imap_unordered(_render_one, tasks(), chunksize=64):
+        images_ds[out_idx] = rgb
+        attrs_ds[out_idx] = attr_vec
+        done += 1
+        if done % log_every == 0:
+            rate = done / (time.time() - t0)
+            logging.info("  %d/%d (%.0f img/s)", done, n, rate)
 
 
 def main():
@@ -69,6 +99,8 @@ def main():
                    "images cycle, each repeat gets a distinct factor draw (see build_split_into)")
     p.add_argument("--n-test", type=int, default=10000, help="may exceed MNIST's native 10k, same as --n-train")
     p.add_argument("--output", default="experiments/hdae/data/packed/morphomnist.h5")
+    p.add_argument("--num-workers", type=int, default=16, help="worker processes for the CPU-bound "
+                   "render step (morphology + affine warp); HDF5 writes stay single-process")
     args = p.parse_args()
 
     config = load_factor_config(args.factor_config)
@@ -97,13 +129,15 @@ def main():
         partitions_ds = f.create_dataset("partitions", shape=(n_total,), dtype=np.int64)
         partitions_ds[n_train:] = 1
 
-        logging.info("rendering %d train images (attributes=%s)", n_train, ATTRIBUTE_NAMES)
-        build_split_into(train_ds, config, index_offset=0, n=n_train,
-                         images_ds=images_ds, attrs_ds=attrs_ds, out_offset=0)
-        logging.info("rendering %d test images", n_test)
-        # Offset test indices past train's so the per-index RNG seed never collides with a train image.
-        build_split_into(test_ds, config, index_offset=10_000_000, n=n_test,
-                         images_ds=images_ds, attrs_ds=attrs_ds, out_offset=n_train)
+        logging.info("rendering with %d worker processes", args.num_workers)
+        with mp.Pool(args.num_workers, initializer=_worker_init, initargs=(config,)) as pool:
+            logging.info("rendering %d train images (attributes=%s)", n_train, ATTRIBUTE_NAMES)
+            build_split_into(train_ds, config, index_offset=0, n=n_train,
+                             images_ds=images_ds, attrs_ds=attrs_ds, out_offset=0, pool=pool)
+            logging.info("rendering %d test images", n_test)
+            # Offset test indices past train's so the per-index RNG seed never collides with a train image.
+            build_split_into(test_ds, config, index_offset=10_000_000, n=n_test,
+                             images_ds=images_ds, attrs_ds=attrs_ds, out_offset=n_train, pool=pool)
 
     logging.info("wrote %s: images=(%d,%d,%d,3) attrs=(%d,%d) (train=%d test=%d)",
                  output, n_total, canvas, canvas, n_total, len(ATTRIBUTE_NAMES), n_train, n_test)

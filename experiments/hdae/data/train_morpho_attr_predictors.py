@@ -34,23 +34,32 @@ from experiments.hdae.data.morphomnist import MorphoMNISTPacked
 logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(message)s")
 
 # name -> "circular" with a period, everything else defaults to "scalar"
-CIRCULAR_ATTRS = {"hue": 1.0, "bg_phase": 2 * np.pi}
-# rotation/slant: classification over fixed +/-45deg bins instead of MSE regression -- MSE rewards
+CIRCULAR_ATTRS = {"bg_phase": 2 * np.pi}
+# rotation/slant: classification over fixed +/-30deg bins instead of MSE regression -- MSE rewards
 # hedging toward the mean on an attribute this confounded with unrelated digit shape (see
 # PROGRESS-SUMMARY / commit log: regression plateaued at ~0.55-0.57x the naive-mean baseline even
 # after regularization + wider capacity). Fixed range (not empirical, unlike every other scalar
 # attribute here) because bin edges need to be stable/interpretable, not fitted to this run's data.
 CATEGORICAL_ATTRS = {
-    "rotation": (-30.0, 30.0, 20), "slant": (-30.0, 30.0, 10),
+    # rotation: widened+coarsened to 5 bins over +/-45deg (2026-08-11) after an ablation showed
+    # this roughly doubles accuracy (26.4% -> 60.0%) with MAE essentially unchanged -- the old
+    # 10-bin/+-30deg accuracy was mostly a bin-width/slant-confound artifact. num_bins/range here
+    # MUST track morphomnist_factors.yaml's discrete_bins params exactly.
+    "rotation": (-45.0, 45.0, 5),
     "translate_x": (-10.0, 10.0, 20), "translate_y": (-10.0, 10.0, 20),
     # digit: 10 exact classes (bin width 1.0, centers land on 0..9), not a proxy binning of a
     # continuous quantity like rotation/slant -- but the same AttrSpec(kind="categorical")
     # machinery applies directly. No closed-form baseline exists for this one either (same as
     # rotation/slant): measure_morphomnist.py excludes it for exactly this reason.
     "digit": (-0.5, 9.5, 10),
+    # hue: moved here from CIRCULAR_ATTRS (2026-08-11) -- morphomnist_factors.yaml now samples hue
+    # from 10 fixed bin centers, not continuous Uniform(0,1), so it's categorical like the others.
+    "hue": (0.0, 1.0, 10),
 }
-TARGET_ATTRS = ["thickness", "intensity", "hue", "slant", "rotation", "scale",
+TARGET_ATTRS = ["thickness", "intensity", "hue", "rotation", "scale",
                 "translate_x", "translate_y", "bg_freq", "bg_phase", "bg_amplitude", "texture_amplitude", "digit"]
+# slant removed (2026-08-11) -- morphomnist_factors.yaml now fixes it at a constant 0.0, so there's
+# nothing to predict (a classifier/regressor on a constant target has no signal).
 RANGE_PAD_FRAC = 0.02  # small headroom beyond the observed min/max so edge samples don't sit exactly at +/-1
 
 

@@ -1,0 +1,64 @@
+# Rotation-classifier ablation (2026-08-11): does removing slant (shear) -- the attribute most
+# visually confusable with rotation from a single still image -- and widening/coarsening rotation
+# to 5 bins over +/-45deg improve rotation classification? Not the main dataset config; a
+# throwaway variant for this one experiment. See morphomnist_factors.yaml for the real config.
+#
+# Two changes from morphomnist_factors.yaml, everything else identical:
+#   - slant: constant 0.0 (was discrete_bins, 10 bins over +/-30deg) -- removes the shear/rotation
+#     visual confound entirely rather than just narrowing it.
+#   - rotation: discrete_bins, 5 bins over +/-45deg (was 10 bins over +/-30deg) -- fewer, more
+#     widely-separated classes (18deg apart instead of 6deg), reverting the wider range that was
+#     narrowed earlier specifically because it sometimes destroyed digit topology (see
+#     morphomnist_factors.yaml's comment) -- worth re-testing now that slant no longer compounds it.
+
+image:
+  digit_size: 28
+  pad: 18
+  canvas_size: 64
+
+factors:
+  thickness:
+    distribution: gamma
+    params: {shape: 10.0, rate: 5.0}
+    offset: 0.5
+  intensity_noise:
+    distribution: normal
+    params: {mean: 0.0, std: 1.0}
+  hue:
+    distribution: discrete_bins
+    params: {low: 0.0, high: 1.0, num_bins: 10}
+
+  slant:
+    distribution: constant
+    params: {value: 0.0}                     # removed for this ablation
+  rotation:
+    distribution: discrete_bins
+    params: {low: -45.0, high: 45.0, num_bins: 5}   # degrees -- widened + coarsened for this ablation
+  scale:
+    distribution: uniform
+    params: {low: 0.85, high: 1.2}
+  translate_x:
+    distribution: discrete_bins
+    params: {low: -10.0, high: 10.0, num_bins: 20}
+  translate_y:
+    distribution: discrete_bins
+    params: {low: -10.0, high: 10.0, num_bins: 20}
+  bg_freq:
+    distribution: uniform
+    params: {low: 1.0, high: 4.0}
+  bg_phase:
+    distribution: uniform
+    params: {low: 0.0, high: 6.283185307179586}
+  bg_amplitude:
+    distribution: uniform
+    params: {low: 0.0, high: 18.0}
+  texture_amplitude:
+    distribution: uniform
+    params: {low: 0.0, high: 10.0}
+
+intensity_formula:
+  scale: 191.0
+  noise_coef: 0.5
+  thickness_coef: 2.0
+  bias: -5.0
+  floor: 64.0

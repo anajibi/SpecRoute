@@ -4,7 +4,7 @@ from torch.cuda import amp
 from choices import TrainMode
 from experiment import LitModel, ema
 
-from .attr_utils import observed_unique, to_index_space
+from .attr_utils import observed_unique, to_cond_values, to_index_space
 
 
 class HDAELitModule(LitModel):
@@ -21,6 +21,8 @@ class HDAELitModule(LitModel):
         if not hasattr(self, "_logged_attr_values"):
             self._logged_attr_values = True
             print(f"HDAE raw attribute unique values sample: {observed_unique(raw)}")
+        if e.cond_specs:
+            return to_cond_values(raw, e.cond_specs).to(raw.device)
         return to_index_space(raw, e.attr_input_range).to(raw.device)
 
     def training_step(self, batch, batch_idx):

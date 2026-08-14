@@ -8,6 +8,7 @@ sys.path.append("/home/anajibi/HDM/diffae_upstream")
 import yaml
 import templates
 from choices import ModelName
+from .attr_conditioner import load_cond_specs
 from .hier_config import HDAEConfig, EncoderHierarchyConfig, ConditioningConfig
 from .hier_encoder import stage_channels
 from model.unet import BeatGANsEncoderConfig
@@ -47,9 +48,12 @@ def load_hdae_config(path, require_data=True):
     conf.style_ch = raw["conditioning"]["style_ch"]
     conf.make_model_conf()
     hdae = HDAEConfig(EncoderHierarchyConfig(**raw["encoder"]), ConditioningConfig(**raw["conditioning"]))
+    if hdae.encoder.causal_graph_path:
+        hdae.encoder.cond_specs = load_cond_specs(hdae.encoder.causal_graph_path, hdae.encoder.conditioning_attrs)
     conf.hdae_conf = hdae
     conf.make_model_conf()
-    if require_data and not Path(raw["data"]["lmdb_path"]).exists():
+    data_key = "h5_path" if raw["data"].get("type") == "morphomnist" else "lmdb_path"
+    if require_data and not Path(raw["data"][data_key]).exists():
         raise FileNotFoundError(
             f"Packed data missing. Run: python experiments/hdae/scripts/preprocess_data.py --config {path}")
     return LoadedConfig(conf, hdae, raw, str(path))

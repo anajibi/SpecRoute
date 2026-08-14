@@ -90,6 +90,13 @@ class AttrSpec:
         angle = raw * (2 * torch.pi / self.period)
         return torch.stack([torch.sin(angle), torch.cos(angle)], dim=-1)
 
+    def bin_center(self, bin_idx: torch.Tensor) -> torch.Tensor:
+        """categorical only: bin index (any shape) -> raw-units value, same formula as
+        `denormalize`'s categorical branch factored out so top-k callers don't duplicate it."""
+        if self.kind != "categorical":
+            raise ValueError(f"bin_center only defined for categorical specs, got {self.kind!r}")
+        return self.lo + (bin_idx.float() + 0.5) * (self.hi - self.lo) / self.num_bins
+
     def denormalize(self, pred: torch.Tensor) -> torch.Tensor:
         """network output -> raw units, shape (B,). Inverse of `normalize`.
         scalar/circular: pred is (B, output_dim) float (network output).
@@ -259,6 +266,22 @@ class AttrRegressionModule(pl.LightningModule):
         self.eval()
         pred = self.model(img.to(self.device))
         return self.spec.denormalize(pred).cpu()
+
+    @torch.no_grad()
+    def predict_topk_classes(self, img: torch.Tensor, k: int = 2) -> torch.Tensor:
+        """Categorical specs only. Returns (B, k) LongTensor of the top-k predicted bin indices,
+        ranked by logit (index 0 == predict_raw's argmax choice). Lets a caller ask "is the true
+        class among the model's top-k guesses" instead of only its single best one -- for an
+        attribute the predictor itself gets wrong some fraction of the time (e.g. rotation at
+        60% top-1), exact-match-only evaluation conflates the *predictor's* error with whatever
+        it's being used to measure (e.g. a generative model's counterfactual-consistency CC/FC).
+        Top-k relaxes that coupling without pretending the predictor is more accurate than it is
+        -- it's an explicit, reported tolerance, not a silently softened metric."""
+        if self.spec.kind != "categorical":
+            raise ValueError(f"predict_topk_classes only defined for categorical specs, got {self.spec.kind!r}")
+        self.eval()
+        logits = self.model(img.to(self.device))
+        return logits.topk(min(k, logits.shape[-1]), dim=-1).indices.cpu()
 
 
 def train_attr_predictor(spec: AttrSpec, attr_col: int, train_dataset: Dataset, val_dataset: Dataset,

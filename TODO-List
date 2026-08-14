@@ -110,7 +110,7 @@ Open decisions, resolved:
 - Binary attributes — logit-of-smoothed-probability, `eps` in config.
 
 
-## 3. Bring in MorphoMNIST and Causal3DIdent datasets — MorphoMNIST dataset+graph done (2026-08-10), rest not started
+## 3. Bring in MorphoMNIST and Causal3DIdent datasets — MorphoMNIST dataset+graph+HDAE training+eval done (2026-08-11), Causal3DIdent not started
 
 > Third, I need to bring MorphoMnist and Causal3DIdent dataset.
 
@@ -187,6 +187,284 @@ this via a trained classifier; Morpho's equivalent isn't decided (see `EXP_NOTES
 
 Depends on: nothing technically, but its main value is validating item 2, so treating it
 as strictly-after-item-2 wastes that value. (In practice landed after item 2, as planned.)
+
+**Second pass (2026-08-11): wiring MorphoMNIST into HDAE training, k=1/5/11.** Your
+instruction: "lets ignore [rotation/slant] for further experiments for now... train 4
+variants of the hierarchical model... with k: 1, 5, 11... check the condition path and
+interventions and fix anything that needs to be fixed for using continuous... [conditioned
+on] Digit, Intensity, Thickness, Hue... make [decisions], but flag them and keep the
+experiments running, dont ask me questions, ask your advisor." No questions were asked;
+decisions below were made autonomously (mostly via `advisor()` consultation) and are
+flagged here as instructed. Training was still running when this was written — see
+"Status" at the end.
+
+**What landed:**
+- **Conditioning path generalized from binary-only to mixed categorical/continuous**
+  (previously: every `conditioning_attrs` entry went through one `nn.Embedding(3, dim)`
+  binary lookup table, hard-asserted in `attr_utils.to_index_space`). New
+  `hdae/attr_conditioner.py`: `AttrCondSpec` (categorical/continuous) + `load_cond_specs`,
+  which reads kind/range/num_classes straight out of `causal_graph_morpho.yaml`'s `nodes:`
+  section rather than duplicating those numbers in the model config — the SCM and the
+  model's conditioning now share one source of truth by construction, not by convention.
+  `MixedAttributeEmbedding`: categorical attrs (`digit`) get a plain lookup table;
+  continuous attrs (`thickness`/`intensity`/`hue`) get min-max normalization to [-1,1] (via
+  the same lo/hi the SCM uses) followed by a 2-layer MLP. CFG/attribute dropout is applied
+  via an explicit boolean mask substituting a learned per-attribute null vector, not a
+  reserved input value — continuous attributes have no spare index the way binary's index 2
+  did. The old `AttributeEmbedding`/`to_index_space` path is untouched and still used
+  whenever a config has no `causal_graph_path` (i.e. every existing CelebA
+  `hier_k1/k5/k11.yaml` config): this was built as a strict superset, existing CelebA
+  checkpoints and configs load and behave identically to before.
+- **Real bug found and fixed during this generalization, not by inspection but by an
+  advisor review that caught it before it shipped:** `AttributeCFGWrapper` (the dual-pass
+  CFG sampler in `hdae_adapter.py`) built its unconditional pass via
+  `torch.full_like(cond["y_idx"], 2)` — a literal sentinel value that meant "null" only
+  because binary indices never took value 2. For a continuous attribute this is silently
+  wrong: `thickness=2.0` is a real, valid thickness, so the "unconditional" pass would
+  quietly condition on a fake data point instead of nothing, with no error. Fixed by
+  branching on embedding type: the mixed path builds an all-True boolean `null_mask` and
+  passes it through `cond`; the binary path is untouched (still uses the index-2 trick,
+  correct for that case).
+- **Verified the conditioning path is actually wired, twice, not just at import time:**
+  (1) at model init, forward+backward on random weights showed the full network output
+  identically zero for two very different attribute vectors — initially alarming, but
+  traced to the diffusion UNet's standard zero-initialized output conv, not a dead
+  conditioning path; switched to checking the per-block style vectors and the raw attribute
+  embedding directly, which differed by a large, non-trivial margin between attribute
+  vectors and correctly zeroed out under the null mask. (2) Ran the actual smoke-test CF
+  script (below) against a real (partially trained) checkpoint end-to-end with no crashes.
+  Not yet done: re-running the style-vector/output-diff check against a *substantially*
+  trained checkpoint (once output conv is no longer near-zero) to confirm the model didn't
+  learn to ignore the attribute embedding in favor of `zs` alone — flagged as a follow-up,
+  not done here for lack of a sufficiently-trained checkpoint at write time.
+- **New `data/morpho_datamodule.py` (`MorphoMNISTDataModule`)**: mirrors
+  `CelebAHQDataModule` but for `morphomnist.h5`'s 2-way partition (0=train, 1=test, no
+  dedicated val) — val is carved out of partition 0. No flip augmentation, unlike CelebA-HQ
+  (a mirrored digit is not a label-preserving transform). `scripts/train.py` now dispatches
+  on `data.type: morphomnist` vs the CelebA default; `config_io.load_hdae_config` checks
+  `h5_path` vs `lmdb_path` for the missing-data guard accordingly.
+- **Three new configs**, `configs/morpho_hier_k{1,5,11}.yaml`: same encoder
+  architecture/hierarchy split as the existing CelebA `hier_k{1,5,11}.yaml` (this is
+  deliberate — the comparison is "does k transfer across datasets the same way", not a
+  from-scratch architecture search), `conditioning_attrs: [digit, thickness, intensity,
+  hue]`, `causal_graph_path` pointing at `causal_graph_morpho.yaml`. `conditioning:`
+  hyperparameters (`cfg_guidance_scale: 3.0`, `cfg_drop_prob: 0.1`, `attr_dropout_prob:
+  0.0`) were inherited unchanged from the CelebA configs, not retuned for this dataset —
+  flagged as a decision, not an oversight; retuning would have meant a hyperparameter sweep
+  with no time budget for it.
+- **SCM re-checked, not refit**: `morpho_scm.pt` (fit against the current 140k dataset in
+  an earlier pass) was verified to match `causal_graph_morpho.yaml`'s current attributes,
+  edges, and per-node kind/range/num_classes exactly — no drift since the last fit, so
+  re-running `train_scm.py` would have reproduced the same checkpoint. Confirmed
+  programmatically, not by inspection.
+- **Training launched**, k=1/5/11 (your message named "4 variants" but only listed three k
+  values, 1/5/11, and later called them "all three models" in the same message — treated as
+  three, not four, and flagged here rather than asked about). Sequenced per your explicit
+  instruction (benchmark solo first, only parallelize if the server has room): k=1 alone
+  measured first at ~6.05 it/s / ~387 img/s / 11GB on an idle RTX 4090; k=5 and k=11 then
+  benchmarked solo on the second GPU at ~9.5 it/s / ~305 img/s / 6.7GB each. Given both
+  cards had >20GB free even fully loaded, final placement: k=1 alone on GPU0 (own card, no
+  compute contention), k=5+k=11 sharing GPU1 (13.4GB combined, steady-state ~5.7 it/s each
+  once contended — measured directly during the real run, not assumed). All three share one
+  `max_steps: 150000` target so the comparison is over equal total training, not equal
+  wall-clock — sized from the *slower*, GPU1-shared pace so k=1 finishes with slack.
+  Incidental: k=5/k=11 auto-resumed from a leftover checkpoint from their own solo
+  benchmark runs (an incomplete cleanup step on my end, not intentional) — harmless because
+  Lightning's `max_steps` is an absolute global-step target, so all three still converge to
+  the same total step count; noted here so the mismatched wall-clock-until-launch across
+  variants isn't mistaken for something else.
+- **Known confound, not fixed:** `k=1` runs at `batch_size_per_gpu: 64` (inherited from the
+  CelebA config), `k=5`/`k=11` at `32`, same `lr` and `max_steps` for all three. k=1 therefore
+  sees roughly 2x the images and a larger gradient-noise-scale advantage over the same step
+  budget. This is inherited provenance from the existing CelebA configs, not a new choice,
+  but restarting with matched batch sizes would have cost real hours from an already-tight
+  window, so it was left as-is and is flagged here instead: **if k=1 comes out ahead in the
+  final comparison, that is confounded with batch size and should not be read as a pure k
+  effect** — the final report states images-seen (steps x batch size) alongside step count
+  per variant for exactly this reason.
+- **Reconstruction eval generalized**: `scripts/reconstruct.py` (LPIPS/MSE/SSIM against a
+  held-out test batch) now dispatches on dataset type and mixed-vs-binary conditioning the
+  same way `train.py` does; new `scripts/compare_morpho_variants.py` aggregates the three
+  variants' `recon_summary.json` into one table. Smoke-tested end-to-end against a real
+  (1000-step) k=1 checkpoint: LPIPS 0.051 / MSE 0.0083 / SSIM 0.916 — already strong this
+  early, a good sign the pipeline (not just the training loop) is wired correctly.
+- **CF1 (this item's own "Not done" callout above) explicitly NOT ported to MorphoMNIST.**
+  `run_cf1_eval.py`'s CC/FC machinery is load-bearing on CelebA specifics that don't
+  translate: a hard `len(attrs) == 40` assertion, a sigmoid multi-label classifier, and a
+  pos/neg cohort JSON keyed by a `>0` binary threshold — none of which has a natural
+  meaning for a categorical `digit` or continuous `thickness`/`intensity`/`hue` without a
+  real redesign (what does "positive direction" mean for thickness?). Judged out of
+  proportion to the time available; instead built `counterfactuals/morpho_cf_smoketest.py`,
+  a lighter but still real check reusing the *same* production intervention path
+  (`HDAEAdapter.encode/intervene/render` + the fitted SCM) a full CF1 port would use:
+  intervenes each of the 4 attributes (propagating thickness's causal edge to intensity via
+  `scm.counterfactual`), renders before/after, and scores movement/leakage using the
+  already-trained per-attribute CNN predictors (`data/train_morpho_attr_predictors.py`,
+  independent of this model's own conditioning signal) as the measurement instrument. To be
+  explicit about the boundary: the *intervention path itself* (encode/intervene/render,
+  including the CFG null-mask fix above) is fixed, generalized, and verified end-to-end for
+  continuous+categorical attributes, matching your "fix anything that needs to be fixed for
+  using continuous" instruction; the *CelebA-specific CF1 statistical harness* on top of it
+  was not ported and would be new work, not a fix.
+  - **Bug caught by advisor review before being reported as a result:** the smoke test's
+    first draft measured "unintended drift" on non-intervened attributes by comparing
+    predictor readings before/after intervention, but `HDAEAdapter.intervene()` (correctly,
+    for the real CF1 contract) writes *every* attribute `scm.counterfactual()` returns, not
+    just the intervened one — and for a non-root, non-descendant attribute, the SCM's
+    abduct/propagate round-trip is not bit-identical to the observed value even with no
+    intervention on it. That reconstruction noise was landing in the "drift" column
+    indistinguishable from real model leakage. Fixed by pinning every attribute that is
+    neither the intervened one nor a declared descendant back to its exact observed value
+    before calling `intervene()`, so the drift column now measures only the model.
+
+**Not done:** Causal3DIdent (unchanged from before this pass); the CF1 harness port
+described above; a batch-size-matched rerun to cleanly separate the k=1 confound from a
+true k effect on reconstruction (see results below — not needed to answer the
+counterfactual-editing question, which points the other way from the confound).
+
+**Final results (2026-08-11, all three runs completed cleanly at exactly 150,000 steps,
+`Trainer.fit stopped: max_steps=150000 reached` for all three, no crashes). Full table in
+`experiments/hdae/outputs/morpho_hier_k_comparison_report.md`; summary:**
+- Reconstruction (LPIPS/MSE/SSIM, `reconstruct.py` + `compare_morpho_variants.py`): k=1
+  best on all three metrics, but k=5 and k=11 (same batch size as each other, unlike k=1)
+  land almost identically while k=1 (2x the images seen) is the outlier — the pattern the
+  batch-size confound predicts on its own, not strong evidence k=1 is architecturally
+  better at reconstruction.
+- Counterfactual editing (`morpho_cf_smoketest.py`, fully-trained checkpoints): digit-swap
+  class-match rate rises sharply and monotonically with k — 0.266 (k=1) -> 0.531 (k=5) ->
+  0.562 (k=11) — in the *opposite* direction from the batch-size confound (k=1 had 2x the
+  data and still edits digits far less reliably). Unintended leakage into non-intervened
+  attributes is also consistently higher for k=1 than k=5/k=11, sharpest for hue
+  interventions leaking into intensity (1.63-1.84 for k=1 vs 0.22-0.56 for k=5/k=11).
+  Thickness/intensity steer reliably toward target across all three k; hue is the weakest
+  attribute at every k (likely because it's modeled as plain continuous, not circular —
+  see the earlier flagged decision), not something more k or more steps would fix on its
+  own.
+- **Bottom line: k=1 wins on reconstruction (confounded), k=5/k=11 clearly win on
+  counterfactual controllability and disentanglement (not confounded the same way) — for
+  this architecture's actual purpose (attribute-conditioned counterfactual generation),
+  more hierarchy levels helps, even with less training data.**
+- Re-verified conditioning is genuinely *used*, not just wired, on k=1's final (150k-step)
+  checkpoint: swapping a full attribute vector while holding the image/noise fixed changes
+  the model's predicted output by ~9.3% relative to its own output scale (near-zero at
+  init, as expected for a zero-initialized output conv) — confirms the model learned to
+  use the attribute embedding, not just carry it around unused.
+
+**Third pass (2026-08-11, later): formal CC/FC/CF1, corrected targets, guidance-scale
+sweep.** User asked to (a) plot empirical thickness/intensity/hue distributions from real
+test data, (b) sweep attribute-CFG guidance scale to 5.0 and 8.0 on top of the trained
+default of 3.0, and (c) compute real CC/FC_observed/FC_unobserved/CF1 (not the earlier
+lightweight smoke test) for each of the 4 conditioning attributes, reusing the existing
+`run_cf1_eval.py` aggregation code, on 512 images with a fixed index set, across both
+GPUs. Full tables in the published CC/FC/CF1 artifact (linked in chat).
+
+- **Plotting the real distributions caught a real problem with the earlier smoke test**:
+  its fixed thickness/intensity intervention targets were out of distribution (thickness
+  "high"=6.5 sat above the p99=4.40; intensity "low"=90 sat right at the observed
+  minimum=89.9) — not moderate edits, near-boundary or unreachable ones. New
+  `experiments/hdae/counterfactuals/morpho_cf1_eval.py` fixes this: targets are now the
+  **train-partition 15th/85th percentiles**, applied to the cohort of images currently on
+  the opposite side of the median (fixed target + cohort-selected source, mirroring
+  CelebA's positive/negative cohort framing rather than an image-adaptive target, which an
+  advisor review flagged as making "success" a moving goalpost).
+- Success/valid criterion per attribute: categorical (digit) needs an exact class match;
+  continuous (thickness/intensity/hue) tolerance = that attribute's own CNN predictor's
+  test-set MAE, **floored at 5% of the p15-p85 gap**. The floor was needed after a real
+  bug surfaced in testing: hue's predictor is so accurate (MAE~0.0007 on a [0,1] scale)
+  that using its raw MAE as tolerance made success require landing within a fraction of a
+  percent of the target — CC came back exactly 0.0 for both hue directions before the fix,
+  not because the model failed but because the bar was unreachable by construction.
+- `cf1()`/`pareto_frontier()`/`frontier_area()` imported directly from `run_cf1_eval.py`
+  (not reimplemented), per instruction that "the code for calculation... is available."
+  FC's flip/drift criterion is new (categorical: class-flip boolean, same as CelebA;
+  continuous: |delta-prediction|/population-std, clipped to [0,1]) since the original
+  `fc_for_pool` assumes an all-boolean CelebA-style matrix.
+- Attribute partition documented explicitly per intervention (CC pool, FC_observed pool,
+  FC_unobserved pool, with sizes) in both the script's own stdout and the published
+  artifact, per instruction. Confirms the one subtle case a reader would suspect is a bug:
+  intervening on `intensity` leaves `thickness` in the FC_observed ("should stay fixed")
+  pool, since do()-interventions don't propagate backward to ancestors.
+- n=512 (not the originally-planned 5000) — explicit user call given the compute budget;
+  fixed index seed=0 throughout so a future 5000-image run would extend this exact sample,
+  not replace it.
+- Compute cost: T=100 diffusion steps x 2 (classifier-free guidance) x 8 renders
+  (reconstruction + 7 interventions) per image, all sequential (DDIM sampling can't
+  parallelize across timesteps) — ~13,600 sequential UNet calls per (model, guidance
+  scale) run, measured at ~1245s each with `torch.compile` deliberately disabled (avoids
+  6 separate compilation passes for 6 short-lived process launches). Ran with
+  `--no-compile` across all 6 (model, guidance-scale) combinations, split 3-and-3 across
+  both GPUs (ignoring an unrelated job already on GPU0, per instruction), ~35-40 min wall
+  clock.
+- **Headline finding, and it revises the earlier smoke-test conclusion**: with corrected,
+  in-distribution targets, k only clearly matters for **digit** (CC 0.26-0.30 at k=1 up to
+  0.73-0.80 at k=11, monotonic across both guidance scales). Thickness and intensity
+  control are roughly **flat** across k=1/5/11 (differences within noise), not the clean
+  "higher k wins" pattern the OOD-target smoke test suggested. Hue control is weak
+  everywhere (CC 0.006-0.094) and mildly **favors k=1** over k=5/k=11 — the opposite
+  direction from digit. Higher guidance scale (8 vs 5) improves CC almost everywhere,
+  most sharply for digit, at a small FC cost (the expected CFG tradeoff).
+
+**Fourth pass (2026-08-11 to 2026-08-14): finalized 70k dataset, categorical hue,
+top-k eval, concat/FiLM conditioning, and a real training-data bug.**
+
+- **Dataset finalized as `morphomnist_70k.h5`** (renamed from the rotation ablation that
+  won: 70k images, rotation 5-bin ±45° instead of the original 20-bin/full-range, slant
+  removed/held constant at 0.0 — an ablation showed rotation's classifier accuracy going
+  26.4%→60.0% and macro-F1 0.245→0.596 once slant stopped confounding it). `hue` changed
+  from continuous to **categorical, 10 fixed bin centers in [0,1]** (was sampled
+  `Uniform(0,1)`) — declared in `causal_graph_morpho.yaml` as
+  `kind: categorical, num_classes: 10, range: [0.0, 1.0]`. All 12 remaining attribute
+  predictors (everything but slant) retrained on the finalized data with batch/lr scaled
+  together; a `predict_topk_classes` top-k accuracy path was added to
+  `data/attr_predictor.py` so CC/FC/CF1 for a categorical attribute isn't bounded by its own
+  measuring predictor's top-1 error.
+- **Real bug, found three separate times because it kept hiding in a new file each time:**
+  code throughout the pipeline assumed a categorical attribute's raw stored value *is* its
+  class index (true for `digit`: stored 0-9; false for `hue`: stored as bin-center floats
+  0.05-0.95). Each instance collapses hue's 10 classes down to 2 via `.round()`/`.long()`
+  truncation:
+  1. `attr_conditioner.py`'s `MixedAttributeEmbedding._embed_one` (model side, baked into
+     trained weights) and `causal/scm.py`'s `nll()` (SCM fit degenerate, NLL 1.12) — found
+     via a corrupted example grid and a suspiciously-flat SCM fit, fixed together with new
+     `categorical_class_index()`/`class_index_to_raw()` helpers on `SCM` and a matching
+     lo/hi-aware branch in `_embed_one` (NLL back to a real 3.42; hue's fitted class
+     distribution confirmed uniform by direct sampling).
+  2. Three eval/grid scripts (`morpho_cf1_eval.py`, `morpho_cf1_eval_binned.py`,
+     `k11_labeled_grid_binned.py`) computing shift-intervention targets the same wrong way
+     — fixed to route through the new SCM helpers.
+  3. **`attr_utils.py`'s `to_cond_values()` — found 2026-08-14, NOT yet fixed.** Same
+     `.round()` bug, but this one sits in the actual training data path
+     (`lit_module.py`'s `_batch_y_idx()`, called every training batch) as well as
+     `hdae_adapter.py`'s `encode()`. This means every hue-conditioned model trained so far
+     (`k1_v2`, `k11_v2`, `k11_v3`) only ever saw hue as a binary 0/1 split during training
+     — the `nn.Embedding(10, ...)` table's rows 1-8 never received gradient. Root-caused via
+     a full repo-wide audit after `k11_v3` came back with hue CC=0.000 (worse than
+     `k11_v2`'s already-degenerate 0.066) despite fix #1 already being in place — fix #1
+     alone can't help if the value it receives has already been collapsed upstream. The
+     fix is the same lo/hi fractional-binning branch already correct in three other places;
+     not applied yet, and `k1_v2`/`k11_v2`/`k11_v3`'s hue numbers should be treated as
+     invalid until it is and they're retrained.
+- **New conditioning options, implemented but only `k11_v3` has (invalidly) trained data**:
+  `conditioning.attr_fusion: concat_film` (opt-in, default remains `sum`, so every existing
+  config/checkpoint is unaffected) switches `MixedAttributeEmbedding`/`PerBlockStyle` (sum
+  per-attribute embeddings into one shared space, then concat with `zs` before one Linear)
+  for `ConcatAttributeEmbedding`/`PerBlockStyleFiLM` (each attribute gets a protected,
+  non-overwritable slice of the embedding; the embedding FiLM-modulates a zs-derived style
+  vector instead of diluting it via concatenation, zero-init so it starts as an exact
+  no-op). Also new: `encoder.attr_dropout_prob` (independent per-attribute dropout,
+  composes with but is distinct from CFG's all-or-nothing `cfg_drop_prob`) — set to 0.08
+  for `k11_v3`. Both verified structurally sound before training: a gradient-flow probe
+  confirmed the FiLM zero-init self-heals within ~2-3 steps with no dead path for any
+  attribute (including the categorical ones), and a 2000-trial sampling check confirmed
+  `attr_dropout_prob` and `cfg_drop_prob` compose to the expected rates. `k11_v3` config:
+  batch 32→64, lr 1e-4→2e-4 (linear scaling), 30k steps, k=11 only per instruction (k=1 not
+  retrained this pass).
+- Status: `k11_v3` trained and evaluated (CC 0.316 vs `k11_v2`'s 0.344, macro CF1 0.397 vs
+  0.431 — a regression, driven by hue's bug-3 corruption above, not a clean read on
+  concat_film/FiLM's actual effect). Not a controlled comparison either way even ignoring
+  the bug: `k11_v3` also saw 2x the samples of `k11_v2` at the same step count. Full
+  code/checkpoints/dataset mirrored to `s3://najibi-research-7f2a/hdae-handoff/` for
+  continuation on another server; see `HANDOFF.md` there for the fix-then-retrain plan.
 
 
 ## 4. Decompose CF1 into observed CF1, unobserved CF1, and Aggregated CF1 — DONE (2026-07-31)

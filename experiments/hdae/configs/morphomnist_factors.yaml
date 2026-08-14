@@ -28,26 +28,29 @@ factors:
   intensity_noise:
     distribution: normal
     params: {mean: 0.0, std: 1.0}          # eps_I
+  # discrete_bins, same rationale as slant/rotation: hue is now a 10-way categorical, sampled
+  # only at bin centers so generated values don't leave residual intra-class variation a
+  # downstream classifier/embedding can't resolve. Changed from continuous uniform (2026-08-11,
+  # your call) -- range/bin-count here MUST match any hue CATEGORICAL_ATTRS entry exactly.
   hue:
-    distribution: uniform
-    params: {low: 0.0, high: 1.0}
+    distribution: discrete_bins
+    params: {low: 0.0, high: 1.0, num_bins: 10}
 
   # --- injected, unobserved (logged, outside the causal graph) ---
-  # rotation/slant narrowed from an earlier +/-45deg (visually confirmed to sometimes destroy a
-  # digit's identifying topology -- e.g. an "8" rendered as a single diagonal stroke with no
-  # loops -- capping both digit and rotation/slant classification accuracy independent of
-  # training). +/-30deg keeps real, observable variation without that failure mode.
-  # discrete_bins (not uniform): the predictor for these is a 20-way classifier
-  # (data/train_morpho_attr_predictors.py CATEGORICAL_ATTRS), and generating a continuous value
-  # anywhere within a bin -- rather than exactly at its center -- leaves real intra-class pixel
-  # variation the classifier can't resolve even in principle. Sampling only the 20 bin centers
-  # removes that residual ambiguity; range/bin-count here MUST match CATEGORICAL_ATTRS exactly.
+  # FINALIZED 2026-08-11 after a rotation-classifier ablation (see TODO-List / commit log):
+  # removing slant entirely and widening+coarsening rotation to 5 bins over +/-45deg roughly
+  # doubled rotation classification accuracy (26.4% -> 60.0% on held-out test, n=2000) and
+  # macro-F1 (0.245 -> 0.596), while MAE barely moved (9.25deg -> 8.87deg) -- confirming the old
+  # low accuracy was mostly bin-width/slant-confound artifact, not a training problem. slant is
+  # removed outright rather than just narrowed, since it was the single biggest confound (shear
+  # and rotation look near-identical to a classifier from one still image) and carried no other
+  # role in the dataset (not a causal-graph node, not used anywhere else).
   slant:
-    distribution: discrete_bins
-    params: {low: -30.0, high: 30.0, num_bins: 10}   # degrees, shear -- coarser than rotation's 20 bins
+    distribution: constant
+    params: {value: 0.0}                     # removed (2026-08-11, your call) -- was discrete_bins, 10 bins over +/-30deg
   rotation:
     distribution: discrete_bins
-    params: {low: -30.0, high: 30.0, num_bins: 20}   # degrees
+    params: {low: -45.0, high: 45.0, num_bins: 5}   # degrees -- widened+coarsened from +/-30deg/10 bins (2026-08-11)
   scale:
     distribution: uniform
     params: {low: 0.85, high: 1.2}         # narrowed from 0.7-1.4, same rationale as rotation/slant

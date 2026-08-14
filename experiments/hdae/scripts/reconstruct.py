@@ -10,7 +10,8 @@ from experiments.hdae.hdae.grid_utils import save_labeled_grid
 from experiments.hdae.hdae.config_io import load_hdae_config
 from experiments.hdae.hdae.lit_module import HDAELitModule
 from experiments.hdae.data.datamodule import CelebAHQDataModule
-from experiments.hdae.hdae.attr_utils import to_index_space
+from experiments.hdae.data.morpho_datamodule import MorphoMNISTDataModule
+from experiments.hdae.hdae.attr_utils import to_cond_values, to_index_space
 
 
 def metrics(x, y):
@@ -48,7 +49,8 @@ def compute_recon_metrics(module, batch, T, num_images=None, attribute_names=Non
     with torch.no_grad():
         e = module.ema_model.hdae_conf.encoder
         cond_indices = [attribute_names.index(name) for name in e.conditioning_attrs]
-        y_idx = to_index_space(batch["attr"][:len(x), cond_indices].to(device), e.attr_input_range)
+        raw_attrs = batch["attr"][:len(x), cond_indices].to(device)
+        y_idx = to_cond_values(raw_attrs, e.cond_specs) if e.cond_specs else to_index_space(raw_attrs, e.attr_input_range)
         zs = module.ema_model.encode(x)
         cond = module.ema_model.make_cond(zs, y_idx)
         xt = module.encode_stochastic(x, cond, T=T)
@@ -69,7 +71,12 @@ def main():
     cfg = load_hdae_config(args.config)
     d = cfg.raw["data"]
     t = cfg.raw["train"]
-    dm = CelebAHQDataModule(d["lmdb_path"], d["attr_npz"], min(args.num_images, t["batch_size_per_gpu"]), 0, False)
+    bs = min(args.num_images, t["batch_size_per_gpu"])
+    if d.get("type") == "morphomnist":
+        dm = MorphoMNISTDataModule(d["h5_path"], bs, 0, val_frac=d.get("val_frac", 0.02),
+                                   preload_images=d.get("preload_images", True))
+    else:
+        dm = CelebAHQDataModule(d["lmdb_path"], d["attr_npz"], bs, 0, False)
     dm.setup()
     module = HDAELitModule.load_from_checkpoint(args.ckpt, conf=cfg.train_conf, map_location="cpu")
     module.eval()

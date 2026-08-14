@@ -44,16 +44,16 @@ DETERMINISTIC_KEY = {
     "translate_x": "translate_x", "translate_y": "translate_y",
     "bg_amplitude": "bg_amplitude", "texture_amplitude": "texture_amplitude",
     "bg_phase": "bg_phase",
-    "rotation": None, "slant": None, "digit": None,  # categorical, no closed-form estimator at all
+    "rotation": None, "digit": None,  # categorical, no closed-form estimator at all
     "scale": None,  # calibrated separately below (fitted linear proxy, not in measure_all)
 }
-CIRCULAR = {"hue": 1.0, "bg_phase": 2 * np.pi}
+CIRCULAR = {"bg_phase": 2 * np.pi}  # hue moved to CATEGORICAL_ATTRS (2026-08-11) -- no longer continuous
 # Categorical attrs whose classes have a real ordering (bin 5 is "close to" bin 6) -- exact-bin
 # accuracy alone understates these badly (a 1-bin miss scores identically to a 19-bin miss), so
 # also report MAE in original units via the bin-center-decoded prediction. Digit is NOT ordinal
 # in the relevant sense (misclassifying 6 as 8 isn't "closer" than misclassifying it as 0) and is
-# excluded.
-ORDINAL_CATEGORICAL = {"rotation", "slant", "translate_x", "translate_y"}
+# excluded. slant removed (2026-08-11) -- now a constant, not a predicted attribute at all.
+ORDINAL_CATEGORICAL = {"rotation", "translate_x", "translate_y"}
 
 
 def to_rgb_u8(img_tensor: torch.Tensor) -> np.ndarray:
@@ -92,6 +92,8 @@ def main():
     p.add_argument("--n-test", type=int, default=2000, help="subset of the test split to evaluate "
                    "(measure_morphomnist.py's curve_fit-based background estimate is slow per-image)")
     p.add_argument("--seed", type=int, default=0)
+    p.add_argument("--top-k", type=int, default=2, help="report top-k accuracy for categorical attrs "
+                   "alongside top-1, so evaluation isn't bound to the predictor's own top-1 error rate")
     p.add_argument("--output", default="experiments/hdae/outputs/attr_predictors/comparison_results.json")
     args = p.parse_args()
 
@@ -114,6 +116,7 @@ def main():
     scale_a, scale_b = fit_scale_calibration(ds, train_indices, seed=args.seed)
 
     cnn_pred = {name: [] for name in TARGET_ATTRS}
+    cnn_topk = {name: [] for name in CATEGORICAL_ATTRS}  # (N, top_k) predicted bin indices
     det_pred = {name: [] for name in TARGET_ATTRS}
     gt = {name: [] for name in TARGET_ATTRS}
 
@@ -127,6 +130,8 @@ def main():
         for name in TARGET_ATTRS:
             preds = models[name].predict_raw(batch).numpy()
             cnn_pred[name].extend(preds.tolist())
+            if name in CATEGORICAL_ATTRS:
+                cnn_topk[name].extend(models[name].predict_topk_classes(batch, k=args.top_k).numpy().tolist())
         imgs_batch.clear()
 
     for count, i in enumerate(test_indices):
@@ -158,7 +163,14 @@ def main():
             pred_class = spec.normalize(torch.from_numpy(c).float()).numpy()  # c is already bin-center-decoded
             acc = float((pred_class == true_class).mean())
             macro_f1 = float(f1_score(true_class, pred_class, average="macro", zero_division=0))
+            # top-k: is the true bin among the model's k highest-logit predictions, not just its
+            # single best guess -- decouples "does the generative process being measured actually
+            # work" from "is this specific predictor's top-1 call always right" (it isn't, e.g.
+            # rotation is 60% top-1). Reported explicitly alongside top-1, not instead of it.
+            topk_arr = np.array(cnn_topk[name])  # (N, top_k) bin indices
+            topk_acc = float((topk_arr == true_class[:, None]).any(axis=1).mean())
             entry = {"tier": "classification", "accuracy": acc, "macro_f1": macro_f1,
+                    f"top{args.top_k}_accuracy": topk_acc,
                     "num_classes": spec.num_bins, "n": len(g), "ordinal": name in ORDINAL_CATEGORICAL,
                     "deterministic_accuracy": None, "deterministic_macro_f1": None,
                     "cnn_mae": None, "deterministic_mae": None, "within_1_bin": None, "within_2_bin": None}
@@ -179,8 +191,8 @@ def main():
                 if name in ORDINAL_CATEGORICAL:
                     entry["deterministic_mae"] = float(np.abs(d - g).mean())
             results[name] = entry
-            logging.info("%-20s accuracy=%.4f macro_f1=%.4f (%d classes) cnn_mae=%s deterministic_accuracy=%s",
-                        name, acc, macro_f1, spec.num_bins,
+            logging.info("%-20s accuracy=%.4f top%d_accuracy=%.4f macro_f1=%.4f (%d classes) cnn_mae=%s deterministic_accuracy=%s",
+                        name, acc, args.top_k, topk_acc, macro_f1, spec.num_bins,
                         f"{entry['cnn_mae']:.4f}" if entry["cnn_mae"] is not None else "n/a",
                         f"{entry['deterministic_accuracy']:.4f}" if key is not None else "n/a")
             continue

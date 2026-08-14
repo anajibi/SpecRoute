@@ -19,8 +19,18 @@ nodes:
   intensity:
     kind: continuous
     range: [60.0, 256.0]   # 0-255 gray level; Pawlowski et al. 2020 formula bounds it to (64,255); empirical [83, 251]
+  # categorical (2026-08-11, was continuous) -- morphomnist_factors.yaml now samples hue from 10
+  # fixed bin centers, not continuous Uniform(0,1); matches the attribute predictor's treatment
+  # (moved from CIRCULAR_ATTRS to CATEGORICAL_ATTRS the same day). Root node, so the SCM's
+  # root-categorical-only restriction (causal/scm.py) is satisfied -- no Gumbel-max abduction needed.
   hue:
-    kind: continuous
+    kind: categorical
+    num_classes: 10
+    # range required here (unlike digit) because hue's raw storage is its actual bin-center value
+    # (0.05, 0.15, ..., 0.95), not already an integer class index the way digit's raw storage
+    # (0..9) is -- SCM._categorical_class_index and any caller building a shift-intervention
+    # target need lo/hi to convert between raw value and class index correctly instead of
+    # truncating (which would collapse nearly all hue values to class 0).
     range: [0.0, 1.0]
 
 scm_checkpoint: experiments/hdae/outputs/scm/morpho_scm.pt

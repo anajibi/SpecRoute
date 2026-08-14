@@ -1,0 +1,56 @@
+base_template: celeba64d2c_autoenc
+data:
+  type: morphomnist
+  h5_path: "experiments/hdae/data/packed/morphomnist_70k.h5"
+  image_size: 64
+  val_frac: 0.02
+  preload_images: true
+encoder:
+  type: hierarchical
+  hier_tap_block_ids: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, mid]
+  hier_level_dims: [47, 47, 47, 47, 47, 47, 46, 46, 46, 46, 46]
+  hier_block_to_level: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 10]
+  n_decoder_output_blocks: 12
+  n_attributes: 4
+  conditioning_attrs: [digit, thickness, intensity, hue]
+  causal_graph_path: "experiments/hdae/configs/causal_graph_morpho.yaml"
+  attr_embed_dim: 128
+  # 0.08 (was 0.0): forces independent per-attribute reliance during training (a training batch
+  # can now have e.g. hue present while digit/thickness are nulled) -- separate from
+  # cfg_drop_prob below, which only ever nulls all 4 attributes together and is what CFG needs;
+  # this is the knob that's actually new here. Distinct from cfg_drop_prob, does not affect it.
+  attr_dropout_prob: 0.08
+  hier_proj: linear
+conditioning:
+  strategy: per_block_attr
+  style_ch: 512
+  latent_drop_prob: 0.0
+  cfg_drop_prob: 0.1
+  cfg_guidance_scale: 3.0
+  # concat_film (was "sum", the default every other config still uses): ConcatAttributeEmbedding
+  # gives each attribute a protected 32-dim slice (128 total / 4 attrs) instead of summing into a
+  # shared 128-dim space; PerBlockStyleFiLM lets that concatenated embedding modulate a
+  # zs-derived style vector (scale+shift) instead of being diluted by concatenation with zs
+  # (which outnumbers it 47:32 here, worse for k=1's 512:128). See attr_conditioner.py.
+  attr_fusion: concat_film
+train:
+  # doubled vs k11_v2 (32 -> 64); lr scaled proportionally (1e-4 -> 2e-4, linear scaling rule).
+  batch_size_per_gpu: 64
+  total_batch_size: 64
+  lr: 2.0e-4
+  ema_decay: 0.9999
+  T: 1000
+  T_eval: 100
+  max_steps: 30000
+  precision: 16-mixed
+  grad_clip: 1.0
+  num_workers: 0
+  compile: false
+lightning:
+  accelerator: gpu
+  devices: 1
+  strategy: cuda
+  log_every_n_steps: 50
+  val_check_interval: 500
+seed: 42
+output_dir: experiments/hdae/outputs/morpho_hier_k11_v3
