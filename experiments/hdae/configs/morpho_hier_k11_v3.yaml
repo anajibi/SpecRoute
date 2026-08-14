@@ -34,8 +34,10 @@ conditioning:
   # (which outnumbers it 47:32 here, worse for k=1's 512:128). See attr_conditioner.py.
   attr_fusion: concat_film
 train:
-  # doubled vs k11_v2 (32 -> 64); lr scaled proportionally (1e-4 -> 2e-4, linear scaling rule).
-  batch_size_per_gpu: 64
+  # global batch unchanged at 64 (32/gpu x 2 gpus), same as the original single-gpu 64 --
+  # 2 gpus is a wall-clock speedup, not a further batch-size change; lr stays 2e-4 (scaled
+  # for the 64 global batch, not from 32/gpu, which is per-process not per-step).
+  batch_size_per_gpu: 32
   total_batch_size: 64
   lr: 2.0e-4
   ema_decay: 0.9999
@@ -48,7 +50,7 @@ train:
   compile: false
 lightning:
   accelerator: gpu
-  devices: 1
+  devices: 2
   strategy: cuda
   log_every_n_steps: 50
   val_check_interval: 500
