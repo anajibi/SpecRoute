@@ -466,6 +466,55 @@ top-k eval, concat/FiLM conditioning, and a real training-data bug.**
   code/checkpoints/dataset mirrored to `s3://najibi-research-7f2a/hdae-handoff/` for
   continuation on another server; see `HANDOFF.md` there for the fix-then-retrain plan.
 
+**Fifth pass (2026-08-14, same day): fixed the fourth `to_cond_values` bug instance, then a
+bounded repo-wide audit for the same bug class plus adjacent risk areas — nothing else
+found.**
+
+- **The fix**: `attr_utils.to_cond_values` used to run every categorical column through
+  `col.round().clamp(0, num_classes - 1)` unconditionally. For a spec *without* declared
+  lo/hi (`digit`) this is a no-op (raw storage already is the class index) — for a spec
+  *with* lo/hi (`hue`) it silently collapsed all `num_classes` bins to `{0, 1}` before the
+  value ever reached the embedder's own (correct) lo/hi binning. Fixed to branch the same
+  way `_embed_one`/`categorical_class_index` already do: with lo/hi declared, clamp to
+  `[lo, hi]` and pass the raw value through unchanged — let the embedder do the actual
+  class-index conversion once, not twice. Verified end-to-end: hue's 10 raw bin-centers now
+  map to 10 distinct class indices through the full pipeline (were `{0,0,0,0,0,1,1,1,1,1}`
+  before); digit's identity path unchanged. Edge case checked and ruled out: a raw hue of
+  exactly `1.0` would bin to class 9 (colliding with `0.95`'s bin) — confirmed via
+  `sample_from_spec`'s `discrete_bins` formula and `class_index_to_raw`'s inverse that
+  hue is only ever generated/targeted at bin *centers* (`0.05..0.95`), so `1.0` is
+  unreachable in this dataset; not fixed further since there's no live path that hits it.
+- **Traced whether this fix silently changes anything already on disk**: it doesn't.
+  `hdae_adapter.intervene()` never used `to_cond_values`'s output for the intervened
+  cohort in the first place — it overwrites every attribute column from `cf_attrs`, which
+  was already built in correct raw units straight from the SCM (this is why the CF1
+  eval scripts' shift-intervention passes were never corrupted, only training and the
+  eval grid's cosmetic "reconstruction" row were). So the already-computed `k1_v2`/
+  `k11_v2`/`k11_v3` CC/FC/CF1 numbers reproduce identically if rerun against the same
+  checkpoints post-fix — the invalidity is purely a training-data problem, fixed for
+  future training, not an eval-script problem that also needed patching retroactively.
+- **Audit scope, deliberately bounded** (per instruction to search for "all bugs and
+  inconsistencies" but per review to not turn that into an unrequested repo-wide rewrite):
+  swept every file referencing `hue` or `categorical` for the *same* bug class (raw value
+  assumed to already be a class index). Confirmed clean: `attr_conditioner.py` (both
+  `_embed_one` implementations, `load_cond_specs`), `causal/scm.py` (`nll`,
+  `categorical_class_index`, `class_index_to_raw`, `abduct`/`propagate`),
+  `data/attr_predictor.py`'s separate `AttrSpec` (the CNN-predictor side, used for
+  CC/FC/CF1 measurement — already correct, never touched by this bug),
+  `train_morpho_attr_predictors.py`, and every `.round()`/`np.round()` call in the three
+  eval/grid scripts (all confirmed digit-only, safe). Two non-bugs noted and deliberately
+  left alone: `causal/verify_scm_morpho.py`'s round-trip check uses a lenient `.round()`
+  for its generic categorical case, but passes on exact equality before any rounding
+  happens, so there's no live discrepancy it could be masking; `counterfactuals/
+  k11_labeled_grid.py` is dead code (superseded by `_binned.py`, referenced nowhere) with
+  a stale hue-as-continuous assumption — not deleted or fixed, since nothing runs it and
+  removing it wasn't asked for.
+- **Not done this pass, by design**: no retrain was launched. Fixing the data bug doesn't
+  retroactively fix `k1_v2`/`k11_v2`/`k11_v3`'s hue conditioning — those checkpoints'
+  `nn.Embedding(10, ...)` hue tables still only have rows {0, 9} trained; a fresh training
+  run is required to actually exercise the fix. That's flagged as the next step, not taken
+  autonomously here.
+
 
 ## 4. Decompose CF1 into observed CF1, unobserved CF1, and Aggregated CF1 — DONE (2026-07-31)
 

@@ -48,10 +48,15 @@
   getting truncated instead of binned) in three places: the trained
   embedding module, the SCM's likelihood/counterfactual math, and three eval
   scripts. **Found a fourth instance of the same bug on 2026-08-14, in the
-  training data path itself (`attr_utils.to_cond_values`) — not yet fixed.**
-  Every hue-conditioned checkpoint trained so far (`k1_v2`, `k11_v2`,
-  `k11_v3`) has invalid hue results as a result; digit/thickness/intensity
-  are unaffected. Also implemented (not yet validly evaluated, same reason):
+  training data path itself (`attr_utils.to_cond_values`) — fixed same day**,
+  after a bounded repo-wide audit confirmed it was the only remaining
+  instance (see `TODO-List` item 3's fifth-pass section for the full sweep
+  and what was deliberately left alone). Every hue-conditioned checkpoint
+  trained so far (`k1_v2`, `k11_v2`, `k11_v3`) still has invalid hue results
+  — the fix only affects *future* training, it doesn't retroactively repair
+  an already-trained embedding table — so a retrain is still needed and
+  hasn't been launched; digit/thickness/intensity are unaffected throughout.
+  Also implemented (not yet validly evaluated, same reason):
   `attr_fusion: concat_film`, an opt-in alternative to summed attribute
   embeddings that gives each attribute a protected slice and FiLM-modulates
   the style vector instead of concatenating into it, plus independent

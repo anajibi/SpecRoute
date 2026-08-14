@@ -47,10 +47,25 @@ def to_cond_values(y_raw: torch.Tensor, specs: Sequence) -> torch.Tensor:
     """Validate/clamp raw mixed-kind attribute columns for ``MixedAttributeEmbedding``.
 
     Unlike ``to_index_space`` (binary-only, converts to a {0,1} lookup index), this leaves values
-    in raw units -- categorical columns are rounded to a valid class index (still float, matching
-    how categorical attrs like ``digit`` are already stored in packed datasets and the SCM),
-    continuous columns are only range-clamped. Per-kind normalization (min-max, embedding lookup)
-    happens inside the embedder, which already needs each spec's kind/lo/hi/num_classes.
+    in raw units -- continuous columns are only range-clamped, categorical columns are clamped in
+    raw units too (NOT converted to a class index here). Per-kind normalization (min-max,
+    lo/hi -> class-index binning, embedding lookup) happens inside the embedder, which already
+    needs each spec's kind/lo/hi/num_classes -- this function must not duplicate that logic with
+    a different convention, or it silently double-converts.
+
+    Real bug fixed here (2026-08-14): this used to do ``col.round().clamp(0, num_classes - 1)``
+    unconditionally for every categorical column, which is only correct for a spec with no
+    declared lo/hi (e.g. ``digit``: raw storage already IS the class index 0..9, so round() is a
+    no-op). For a spec WITH lo/hi (e.g. ``hue``: raw storage is a bin-center float, 0.05..0.95),
+    that same round() collapses all ``num_classes`` classes down to just {0, 1} -- and because this
+    function feeds every training batch (``lit_module.py``'s ``_batch_y_idx``), the model never
+    saw more than 2 distinguishable hue values during training, regardless of how correctly the
+    embedder's own lo/hi binning (``attr_conditioner.py``'s ``_embed_one``) was implemented
+    downstream. Fix: for a spec with lo/hi, just clamp to that range and let the embedder do the
+    real binning -- same branch condition as ``_embed_one`` and
+    ``causal/scm.py``'s ``categorical_class_index``, but the action here is "pass through raw
+    units", not "compute a class index" (computing one here and letting the embedder bin it again
+    would double-convert).
     """
     if torch.isnan(y_raw.float()).any():
         raise ValueError(f"attribute tensor contains NaN; observed={observed_unique(y_raw)}")
@@ -58,7 +73,10 @@ def to_cond_values(y_raw: torch.Tensor, specs: Sequence) -> torch.Tensor:
     for i, spec in enumerate(specs):
         col = y_raw[:, i]
         if spec.kind == "categorical":
-            out[:, i] = col.round().clamp(0, spec.num_classes - 1)
+            if spec.lo is not None and spec.hi is not None:
+                out[:, i] = col.clamp(spec.lo, spec.hi)
+            else:
+                out[:, i] = col.round().clamp(0, spec.num_classes - 1)
         else:
             out[:, i] = col.clamp(spec.lo, spec.hi)
     return out
