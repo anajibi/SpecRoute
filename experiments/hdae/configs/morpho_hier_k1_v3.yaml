@@ -1,0 +1,49 @@
+base_template: celeba64d2c_autoenc
+data:
+  type: morphomnist
+  h5_path: "experiments/hdae/data/packed/morphomnist_70k.h5"
+  image_size: 64
+  val_frac: 0.02
+  preload_images: true
+encoder:
+  type: hierarchical
+  hier_tap_block_ids: [mid]
+  hier_level_dims: [512]
+  hier_block_to_level: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+  n_decoder_output_blocks: 12
+  n_attributes: 4
+  conditioning_attrs: [digit, thickness, intensity, hue]
+  causal_graph_path: "experiments/hdae/configs/causal_graph_morpho.yaml"
+  attr_embed_dim: 128
+  attr_dropout_prob: 0.08
+  hier_proj: linear
+conditioning:
+  strategy: per_block_attr
+  style_ch: 512
+  latent_drop_prob: 0.0
+  cfg_drop_prob: 0.1
+  cfg_guidance_scale: 3.0
+  attr_fusion: concat_film
+train:
+  # single GPU (k1 and k5 run in parallel, one GPU each); batch/lr doubled vs the k1_v2
+  # baseline (32/1e-4 -> 64/2e-4) for a faster, matched-recipe 3-way k=1/5/11 comparison
+  # against the already-trained k11_v3 (concat_film, attr_dropout=0.08, fixed hue code).
+  batch_size_per_gpu: 64
+  total_batch_size: 64
+  lr: 2.0e-4
+  ema_decay: 0.9999
+  T: 1000
+  T_eval: 100
+  max_steps: 30000
+  precision: 16-mixed
+  grad_clip: 1.0
+  num_workers: 0
+  compile: false
+lightning:
+  accelerator: gpu
+  devices: 1
+  strategy: cuda
+  log_every_n_steps: 50
+  val_check_interval: 500
+seed: 42
+output_dir: experiments/hdae/outputs/morpho_hier_k1_v3
