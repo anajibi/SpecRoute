@@ -56,14 +56,26 @@
   — the fix only affects *future* training, it doesn't retroactively repair
   an already-trained embedding table — so a retrain is still needed and
   hasn't been launched; digit/thickness/intensity are unaffected throughout.
-  Also implemented (not yet validly evaluated, same reason):
-  `attr_fusion: concat_film`, an opt-in alternative to summed attribute
-  embeddings that gives each attribute a protected slice and FiLM-modulates
-  the style vector instead of concatenating into it, plus independent
-  per-attribute dropout (`attr_dropout_prob`). Full state, including the
-  fix-then-retrain plan, mirrored to
-  `s3://najibi-research-7f2a/hdae-handoff/HANDOFF.md` for continuation on
-  another server.
+  Also implemented: `attr_fusion: concat_film`, an opt-in alternative to
+  summed attribute embeddings that gives each attribute a protected slice
+  and FiLM-modulates the style vector instead of concatenating into it, plus
+  independent per-attribute dropout (`attr_dropout_prob`). Full state
+  mirrored to `s3://najibi-research-7f2a/hdae-handoff/`.
+
+- **Item 3, retrain (2026-08-14 to 2026-08-17).** Deleted the three
+  pre-fix checkpoints (`k1_v2`/`k11_v2`/`k11_v3`) and retrained `k11_v3` on
+  the fixed code, distributed across both GPUs (batch 128 global, lr 4e-4,
+  30k steps). **The fix works**: hue CC went from 0.000 (pre-fix) to
+  **0.971**, confirmed both numerically and by eye in a labeled sweep grid
+  (every sampled hue intervention now renders the correct target color,
+  previously either inert or corrupted noise). Global CC 0.316→0.504, macro
+  CF1 0.397→0.497, digit CC also improved (0.706→0.755). Real tradeoff, not
+  free: hue's FC_obs dropped to 0.29 — intervening on hue now visibly pulls
+  thickness along with it some of the time. Not a controlled ablation of
+  `concat_film`/`attr_dropout` in isolation (would need a `sum`/no-dropout
+  run on the same fixed code to isolate that), but the actual blocker — the
+  `to_cond_values` bug — is confirmed fixed. Full detail in `TODO-List`
+  item 3's sixth-pass section.
 
 ## Not done
 

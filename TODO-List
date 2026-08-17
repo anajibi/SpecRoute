@@ -515,6 +515,44 @@ found.**
   run is required to actually exercise the fix. That's flagged as the next step, not taken
   autonomously here.
 
+**Sixth pass (2026-08-14 to 2026-08-17): retrained `k11_v3` on the fixed code, both GPUs,
+confirms the fix.** Per instruction: deleted the three bad checkpoints (`k1_v2`, `k11_v2`,
+`k11_v3` — all trained pre-fix), retrained `k11_v3` only (not `k1_v2`), distributed across
+both GPUs (`devices: 2, strategy: cuda`, mirroring the existing working CelebA-HQ
+`hier_k11.yaml` multi-GPU pattern). Batch size was doubled twice over the course of this:
+first to keep the same 64 global batch across 2 GPUs (32/gpu), then doubled again to 128
+global (64/gpu) with lr scaled 2e-4→4e-4 (linear scaling rule) — the second doubling
+required also fixing `val_check_interval` (500→250), since doubling the batch halved
+batches/epoch (918→459) below the old interval, which PL rejects outright rather than
+silently skipping validation. 30k steps, ~2.5-4.3 it/s depending on GPU contention from
+other users' jobs sharing the cluster, finished cleanly (`Trainer.fit stopped:
+max_steps=30000 reached`, final loss ~0.0079).
+
+**Result — the fix works, confirmed both numerically and visually:**
+
+| model | global CC | macro CF1 (obs) | hue CC | digit CC |
+|---|---|---|---|---|
+| `k11_v2` (sum, no dropout, pre-fix) | 0.344 | 0.431 | 0.066 | 0.706 |
+| `k11_v3` pre-fix (concat_film, buggy hue) | 0.316 | 0.397 | 0.000 | 0.706 |
+| `k11_v3` post-fix (concat_film, attr_dropout=0.08) | **0.504** | **0.497** | **0.971** | 0.755 |
+
+Hue CC went from a dead 0.000 to 0.971 — the labeled sweep grid
+(`grid_gs8_postfix.png`) confirms this visually: all 8 sampled hue interventions render
+the correct target color (previously they either didn't move or rendered as corrupted
+noise). Digit also improved. **Real cost, not free**: hue's `FC_obs` dropped to 0.29 (was
+~1.0 pre-fix, trivially, since hue wasn't doing anything) — intervening on hue now visibly
+pulls thickness along with it some of the time (seen directly in the grid: thickness
+values inflate in several cells of the hue-intervention row) and the hue row's backgrounds
+are slightly grainier. Thickness/intensity CC roughly unchanged (0.27/0.21). This is *not*
+a controlled ablation of `concat_film`/`attr_dropout` in isolation — that would need a
+`sum`/no-dropout run on the same fixed code and same batch/lr/step budget, not done here,
+not asked for. What's confirmed is narrower but real: the `to_cond_values` fix was the
+actual blocker, and hue conditioning genuinely works once it's gone.
+
+Checkpoint deduped (`epoch=65-step=30000.ckpt` vs `last.ckpt`, verified identical via
+`md5sum`, kept `last.ckpt` only). Stale pre-fix `cf1_eval_gs8/` outputs for `k11_v3`
+were overwritten by the fresh eval rather than kept alongside.
+
 
 ## 4. Decompose CF1 into observed CF1, unobserved CF1, and Aggregated CF1 — DONE (2026-07-31)
 
