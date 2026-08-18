@@ -584,6 +584,44 @@ retrain with a different seed) would be new scope.
 Checkpoints deduped for both (`epoch=32-step=30000.ckpt` vs `last.ckpt`, verified via
 `md5sum`).
 
+**Eighth pass (2026-08-18): re-ran CC/FC/CF1 with two tolerance redesigns, plus a 3-way
+comparison grid.** New `morpho_cf1_eval_toleranced.py` (`morpho_cf1_eval_binned.py` kept
+untouched as the original):
+
+- **thickness/intensity's CC target tolerance** changed from `max(cnn_mae, 5% of p15-p85
+  gap)` to half the width of the image's own *target* bin (`bin_edges` in
+  `intervention_cohorts.json` are unequal-width population-quantile bins, so this is
+  computed per image, not one fixed number). digit/hue are **unchanged by construction**:
+  a categorical predictor's `predict_raw` always returns its predicted class's exact bin
+  center, so a half-bin-width raw-unit tolerance can never admit a wrong class — it's
+  mathematically identical to the existing exact-class-match. Confirmed empirically: digit
+  CC matched the original binned eval exactly (0.7554), hue matched within normal GPU
+  floating-point nondeterminism (0.9707 vs 0.9688, ~1 image out of 512, same as seen
+  earlier this session for repeated runs under `cudnn.benchmark=True`).
+- **FC_unobserved only**: replaced the soft std-normalized drift score with a hard gate,
+  `|after - before| <= mult * cnn_mae(attr)`, run once at `mult=2` and once at `mult=3`
+  (six total runs: 3 models x 2 mults). FC_observed and the within-CC descendant-
+  consistency check (thickness->intensity when thickness is intervened) were left
+  **unchanged** — both are "stay near a reference that isn't a cohort target_bin" cases
+  with no natural bin-width tolerance to derive from, and redesigning them wasn't asked
+  for; noted as an open inconsistency rather than silently fixed.
+- **Known, un-fixed limitation, flagged not fixed**: `bg_phase` wraps at 2*pi but only
+  `hue` is in the circular-diff set this script uses, so `bg_phase`'s hard-gate comparison
+  is wrap-unaware — a value near the 0/2*pi boundary can read as a large spurious drift.
+  Pre-existing in `morpho_cf1_eval.py` too, just more consequential now under a hard gate.
+
+Full combined results, all 3 models x both mults, in
+`experiments/hdae/outputs/k1_k5_k11_tolerance_comparison_full.csv`. Headline numbers
+(mult=2, macro CF1_observed / CF1_unobserved): k1_v3 0.631/0.647, k5_v3 0.460/0.458,
+k11_v3 0.514/0.579 — same ranking as the original (untoleranced) eval, k1 > k11 > k5.
+
+**New `compare_k1_k5_k11_grid.py`**: same 6 source images, same interventions, one row per
+model per intervention (grouped by intervention so a reader scans across k=1/5/11 for the
+same edit) — `outputs/k1_k5_k11_comparison_grid_gs8.png`. Makes the k5 hue anomaly (flagged
+in the seventh pass) unambiguous side by side: k1's and k11's `hue` rows are clean and
+correctly colored across all 6 images; k5's row has 4 of 6 cells rendering as corrupted,
+shape-losing color blobs.
+
 
 ## 4. Decompose CF1 into observed CF1, unobserved CF1, and Aggregated CF1 — DONE (2026-07-31)
 
