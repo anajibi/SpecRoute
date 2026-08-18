@@ -77,6 +77,17 @@
   `to_cond_values` bug — is confirmed fixed. Full detail in `TODO-List`
   item 3's sixth-pass section.
 
+- **Item 3, k=1/5/11 comparison (2026-08-17 to 2026-08-18).** Trained
+  `k1_v3`/`k5_v3` with the same recipe as `k11_v3` for a matched 3-way
+  comparison. `k1_v3` performs best overall (global CC 0.558, hue CC 0.990).
+  **`k5_v3` is a real anomaly**: hue CC only 0.182 (vs 0.99/0.97 for k1/k11)
+  despite identical code/data/batch/lr — confirmed by eye, several hue
+  interventions render as corrupted color blobs. Root cause not
+  investigated (candidates: unlucky seed, or a genuine k=5-specific
+  interaction with FiLM) — flagged, not pursued, since training all three
+  fast was the actual ask. Full table in `TODO-List` item 3's seventh-pass
+  section.
+
 ## Not done
 
 - **Item 2, follow-up:** the causal DAG itself is still empty — add real

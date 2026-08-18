@@ -553,6 +553,37 @@ Checkpoint deduped (`epoch=65-step=30000.ckpt` vs `last.ckpt`, verified identica
 `md5sum`, kept `last.ckpt` only). Stale pre-fix `cf1_eval_gs8/` outputs for `k11_v3`
 were overwritten by the fresh eval rather than kept alongside.
 
+**Seventh pass (2026-08-17 to 2026-08-18): trained k1_v3/k5_v3 for a matched 3-way k
+comparison, found a genuine k=5 anomaly.** Deleted the three remaining pre-fix stale
+checkpoints (local copies already gone; S3 copies in both `checkpoints/` and `outputs/`
+removed, replaced with the valid `k11_v3` checkpoint + its results). Trained `k1_v3`/
+`k5_v3` with the identical recipe as `k11_v3` (`concat_film`, `attr_dropout_prob: 0.08`,
+fixed hue code) so only `k` varies — single GPU each (parallel, one GPU apiece, per
+instruction), batch 64/lr 2e-4 (doubled vs their pre-v3 baselines), 30k steps. Both
+stopped and cleanly resumed once mid-run (`last.ckpt` checkpointed every 1000 steps,
+`train.py` auto-resumes from it) with no issue.
+
+CF1/CC/FC eval, guidance scale 8, same 512-image cohort as `k11_v3`:
+
+| model | global CC | macro CF1 (obs) | digit CC | hue CC | thickness CC | intensity CC |
+|---|---|---|---|---|---|---|
+| k1_v3 | 0.558 | 0.628 | 0.758 | 0.990 | 0.335 | 0.325 |
+| k5_v3 | 0.330 | 0.451 | 0.651 | **0.182** | 0.273 | 0.263 |
+| k11_v3 | 0.504 | 0.497 | 0.755 | 0.971 | 0.271 | 0.213 |
+
+**k5_v3 is a real, confirmed anomaly, not a metric artifact.** Same code, same data, same
+batch/lr as k1_v3 (which worked fine) — yet k5's hue CC is 5x lower than k1/k11's, and its
+labeled sweep grid (`grid_gs8.png`) shows several hue-intervention cells rendering as
+corrupted, non-digit-shaped color blobs (visibly worse than k11's pre-fix failure mode).
+Root cause not yet investigated — candidates include an unlucky seed/init, or a genuine
+interaction between k=5's specific `level_dims` split and the FiLM merge, but neither has
+been checked. Flagged for the user rather than pursued further this pass, since "trained
+fast and compared" was the actual ask and is now satisfied; a deeper investigation (e.g.
+retrain with a different seed) would be new scope.
+
+Checkpoints deduped for both (`epoch=32-step=30000.ckpt` vs `last.ckpt`, verified via
+`md5sum`).
+
 
 ## 4. Decompose CF1 into observed CF1, unobserved CF1, and Aggregated CF1 — DONE (2026-07-31)
 
