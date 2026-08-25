@@ -79,16 +79,35 @@ def main():
     else:
         resume = None
 
+    # Checkpoint cadence is config-driven: save_top_k=-1 keeps every snapshot, so
+    # `checkpoint_every_n_steps` alone decides how many land on disk over the run.
+    ckpt_every = int(t.get('checkpoint_every_n_steps', 1000))
+    keep = int(t.get('save_top_k', 1))
     callbacks = [
         ModelCheckpoint(
             dirpath=str(out / 'checkpoints'),
             save_last=True,
-            save_top_k=1,  # Keep only the 1 most recent step-checkpoint
-            every_n_train_steps=1000,  # Save exactly every 1000 batches
+            save_top_k=keep,
+            every_n_train_steps=ckpt_every,
             save_on_train_epoch_end=False  # STRICTLY disable the default epoch-end save
         ),
         LearningRateMonitor('step')
     ]
+    n_img_ep = int(t.get('log_images_every_n_epochs', 0))
+    if n_img_ep > 0:
+        from experiments.hdae.hdae.image_logger import ImageLogCallback
+        scm = d.get('scm_checkpoint') or 'experiments/hdae/outputs/scm/causal3dident_scm_spline.pt'
+        callbacks.append(ImageLogCallback(
+            h5_path=d.get('test_h5_path') or d['h5_path'],
+            every_n_epochs=n_img_ep,
+            n_images=int(t.get('log_images_n', 4)),
+            T=int(t.get('T_eval', 100)),
+            guidance=float(cfg.raw['conditioning'].get('cfg_guidance_scale', 3.0)),
+            scm_path=scm,
+            seed=int(cfg.raw.get('seed', 0)),
+        ))
+        print(f'image logging: every {n_img_ep} epochs, {t.get("log_images_n", 4)} images, '
+              f'guidance {cfg.raw["conditioning"].get("cfg_guidance_scale", 3.0)}')
 
     trainer = pl.Trainer(
         **cfg.lightning_kwargs(),
@@ -98,8 +117,15 @@ def main():
         logger=TensorBoardLogger(str(out), name='logs')
     )
 
+    lit = HDAELitModule(cfg.train_conf)
+    if t.get('compile'):
+        # train.compile was a dead config key until now -- nothing read it, so setting it
+        # true silently did nothing. See HDAELitModule.enable_compile for why only a side
+        # handle is compiled and self.model is left alone.
+        lit.enable_compile(t['compile'] if isinstance(t['compile'], str) else 'default')
+
     # This is the line that was causing the recursive spawning loop
-    trainer.fit(HDAELitModule(cfg.train_conf), datamodule=dm)
+    trainer.fit(lit, datamodule=dm)
 
 
 # --- Strict Multiprocessing Guard ---

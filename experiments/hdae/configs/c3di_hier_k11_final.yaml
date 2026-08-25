@@ -1,5 +1,5 @@
-# FULL-LENGTH Causal3DIdent run: arm C conditioning at k=1, RESUMED from the ablation's
-# arm C checkpoint (50,000 steps at batch 32). Counterpart to c3di_hier_k11_final.yaml.
+# FULL-LENGTH Causal3DIdent run: arm C conditioning at k=11, TRAINED FROM SCRATCH.
+# (No k=11 checkpoint exists -- the ablation was run at k=1, so nothing to resume.)
 #
 # Conditioning: Fourier features on continuous attributes AND per-attribute RMSNorm, fused
 # with concat_film. Chosen on two measurements over the three ablation arms (all k=1, same
@@ -58,12 +58,14 @@ data:
   preload_images: false   # 13.5GB file; the OS page cache holds it after the first epoch
 encoder:
   type: hierarchical
-  # k=1: a single mid-level tap; the whole 512-d semantic budget sits in one vector.
-  # This is the direct counterpart to the k=11 run -- identical in every other respect --
-  # so the two together isolate the effect of hierarchy depth.
-  hier_tap_block_ids: [mid]
-  hier_level_dims: [512]
-  hier_block_to_level: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+  # k=11: eleven taps spanning the encoder, 128x128 down to 4x4 (encoder has 18 input
+  # blocks, ids 0..17, plus "mid"). The 512-d semantic budget is split across all eleven
+  # levels (6x47 + 5x46 = 512) rather than concentrated in one, so this trades per-level
+  # capacity for resolution-ordered structure. 15 decoder output blocks map onto the 11
+  # levels sequentially with the last repeated, matching the morpho_hier_k11 convention.
+  hier_tap_block_ids: [0, 2, 4, 6, 8, 10, 12, 14, 15, 16, mid]
+  hier_level_dims: [47, 47, 47, 47, 47, 47, 46, 46, 46, 46, 46]
+  hier_block_to_level: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 10, 10, 10, 10]
   n_decoder_output_blocks: 15   # ffhq128_autoenc_base: output_num_blocks = [3,3,3,3,3]
   n_attributes: 4
   # 4 modelled attributes; pos_obj/rot_obj are VECTOR-valued (dim 3 each, declared in the causal
@@ -90,18 +92,14 @@ train:
   ema_decay: 0.9999
   T: 1000
   T_eval: 100
-  # 217,937 not 192,937: this run RESUMES from 50,000 steps already taken at batch 32
-  # (1,600,000 samples). Copying k=11's max_steps verbatim would stop k=1 at 10,747,968
-  # samples -- 43.5 epochs against k=11's 50 -- and a depth comparison run at unequal
-  # sample counts is not a depth comparison. 50,000 + 167,937 x 64 = 12,347,968 samples.
-  max_steps: 217937   # 50 epochs of SAMPLES, accounting for the batch-32 prefix
+  max_steps: 192937   # 50 epochs = 12,348,000 samples at batch 64
   precision: 16-mixed
   grad_clip: 1.0
   num_workers: 4
-  # 4 checkpoints across the run: 217,937 / 4 = 54,484 steps apart, save_top_k -1 keeps
+  # 4 checkpoints across the run: 192,937 / 4 = 48,234 steps apart, save_top_k -1 keeps
   # them all (~2.1GB each). Gives rollback points -- the MorphoMNIST run regressed between
   # 30k and 45k steps, and with only `last.ckpt` there was nothing to fall back to.
-  checkpoint_every_n_steps: 54484   # 4 saves over the 217,937-step total
+  checkpoint_every_n_steps: 48234
   save_top_k: -1
   # Reconstruction + counterfactual grids into TensorBoard every 3 epochs, so conditioning
   # can be watched while the run is live rather than only at the end.
@@ -115,4 +113,4 @@ lightning:
   log_every_n_steps: 50
   val_check_interval: 1929   # half an epoch (3,858 batches/epoch) -> 100 validation points
 seed: 42                  # identical across all three arms
-output_dir: experiments/hdae/outputs/c3di_k1_final
+output_dir: experiments/hdae/outputs/c3di_k11_final

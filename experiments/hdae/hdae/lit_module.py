@@ -2,6 +2,8 @@
 from torch.cuda import amp
 
 from choices import TrainMode
+import torch
+
 from experiment import LitModel, ema
 
 from .attr_utils import observed_unique, to_cond_values, to_index_space
@@ -40,6 +42,33 @@ class HDAELitModule(LitModel):
             return to_cond_values(raw, e.cond_specs).to(raw.device)
         return to_index_space(raw, e.attr_input_range).to(raw.device)
 
+    def enable_compile(self, mode: str = "default"):
+        """Compile a SEPARATE callable that shares self.model's parameters.
+
+        self.model itself is deliberately left uncompiled. torch.compile returns an
+        OptimizedModule whose state_dict keys carry a `_orig_mod.` prefix, and two things
+        here index state_dict by key: upstream's ema() zips source.state_dict().keys() into
+        target.state_dict()[key] (a compiled source against an uncompiled ema_model would
+        KeyError on the first EMA step), and Lightning's checkpointing would bake the
+        prefix into every saved checkpoint, making it unloadable by uncompiled code.
+        Compiling a side handle avoids both: parameters are shared, not copied, so the
+        compiled path trains exactly the same weights while state_dict stays clean.
+        """
+        # object.__setattr__ bypasses nn.Module.__setattr__, which would REGISTER the
+        # OptimizedModule as a child module -- it then reappears in state_dict() as
+        # `_compiled_model._orig_mod.*`, duplicating every weight in the checkpoint and
+        # making strict load_state_dict into an uncompiled module fail on unexpected keys.
+        # (Measured: 760 extra keys of 2281 before this fix.) Writing straight to __dict__
+        # keeps the handle usable while leaving the module tree untouched.
+        object.__setattr__(self, "_compiled_model", torch.compile(self.model, mode=mode))
+        print(f"torch.compile enabled (mode={mode}); self.model left uncompiled so "
+              f"checkpoints and EMA stay prefix-free", flush=True)
+        return self._compiled_model
+
+    @property
+    def train_model(self):
+        return self.__dict__.get("_compiled_model") or self.model
+
     def training_step(self, batch, batch_idx):
         if self.conf.train_mode != TrainMode.diffusion:
             return super().training_step(batch, batch_idx)
@@ -49,7 +78,7 @@ class HDAELitModule(LitModel):
             zs = self.model.encode(x_start)
             t, _weight = self.T_sampler.sample(len(x_start), x_start.device)
             losses = self.sampler.training_losses(
-                model=self.model,
+                model=self.train_model,
                 x_start=x_start,
                 t=t,
                 model_kwargs={"cond": self.model.make_cond(zs, y_idx)},
