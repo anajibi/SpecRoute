@@ -1,0 +1,101 @@
+# Cluster configuration -- THE single file to edit when a host, user, or port changes.
+#
+# Every script that touches a remote machine reads this file and nothing else, so
+# updating an IP here is enough; no script needs editing. Use it via scripts/cluster.py:
+#
+#   python scripts/cluster.py list                 # show configured nodes
+#   python scripts/cluster.py ping                 # test ssh to every node
+#   python scripts/cluster.py info gpu1            # probe hardware
+#   python scripts/cluster.py run gpu1 'nvidia-smi'
+#   python scripts/cluster.py setup gpu1           # clone repo + build venv
+#   python scripts/cluster.py push gpu1 <path>     # copy a file/dir over
+#
+# `hardware` fields are a PROBED SNAPSHOT, recorded for planning (batch size, whether a
+# torch build is compatible). They are documentation, not configuration -- nothing reads
+# them, and they can go stale if a node is rebuilt. Re-probe with `info`.
+
+control:
+  # The node running the session that drives everything else. Not connected to over ssh.
+  name: control
+  hostname: partly-valid-mantis
+  user: exouser
+  workdir: /home/exouser/SpecRoute
+  ssh_public_key: ~/.ssh/id_ed25519.pub   # add this to each compute node's authorized_keys
+
+defaults:
+  user: exouser
+  port: 22
+  ssh_key: ~/.ssh/id_ed25519
+  workdir: /home/exouser/SpecRoute
+  venv: /home/exouser/SpecRoute/.venv
+  python: python3.11                       # version the venv is built with, via uv
+  # Extra ssh options applied to every connection.
+  ssh_opts: ["-o", "BatchMode=yes", "-o", "ConnectTimeout=15", "-o", "StrictHostKeyChecking=accept-new"]
+
+nodes:
+  - name: gpu1
+    host: 149.165.153.184
+    # user / port / ssh_key / workdir / venv inherit from `defaults` unless set here.
+    enabled: true
+    role: training
+    hardware:                              # probed 2026-08-25, snapshot only
+      gpu: NVIDIA A100-SXM4-40GB
+      gpu_count: 1
+      vram_mib: 40960
+      driver: "595.84"
+      cuda: "13.2"
+      cpus: 32
+      ram_gb: 115
+      disk_free_gb: 47
+      hostname: inherently-immortal-hyena
+      python_system: "3.12.3"
+
+# --- shared project settings the remote nodes need -------------------------------------
+
+repo:
+  url: git@github.com:anajibi/SpecRoute.git
+  branch: wip-from-826a88e
+
+s3:
+  bucket: najibi-research-7f2a
+  prefix: wip-from-826a88e
+  # Credentials are NOT stored here. Run `aws configure` on each node yourself.
+
+# Files a training node needs that are not in git (all gitignored: too large).
+# Sizes are approximate, for planning transfers.
+payload:
+  - path: experiments/hdae/data/causal3dident/causal3dident_trainset_128.h5
+    size_gb: 12.4
+    required: true
+    note: 252,000 images at 128x128; rebuildable from Zenodo via scripts/build_causal3dident.py
+  - path: experiments/hdae/data/causal3dident/causal3dident_testset_128.h5
+    size_gb: 1.2
+    required: true
+    note: 25,200 held-out images
+  - path: experiments/hdae/outputs/scm/causal3dident_scm_spline.pt
+    size_gb: 0.001
+    required: true
+    note: spline SCM, needed for counterfactual attribute vectors
+  - path: experiments/hdae/outputs/c3di_k1_both/checkpoints/last.ckpt
+    size_gb: 2.0
+    required: false
+    note: arm C at step 50,000 -- only needed to RESUME rather than train from scratch
+
+# Environment recreation, in order. Kept here so `setup` and a human follow one recipe.
+bootstrap:
+  - "curl -LsSf https://astral.sh/uv/install.sh | sh"
+  - "uv venv --python 3.11 {venv}"
+  - "uv pip install --python {venv}/bin/python torch==2.2.2 torchvision==0.17.2 --index-url https://download.pytorch.org/whl/cu121"
+  - "uv pip install --python {venv}/bin/python -r diffae_upstream/requirements.txt"
+  - "uv pip install --python {venv}/bin/python -r experiments/hdae/requirements.txt"
+  - "uv pip install --python {venv}/bin/python 'setuptools<81' h5py lpips"
+
+# Reminders that are easy to get wrong; `setup` prints these at the end.
+gotchas:
+  - "max_steps in a config must be RAISED above a resumed checkpoint's global_step, or
+     train.py restores, sees the limit already met, and exits without training a step."
+  - "torch 2.2.2+cu121 supports up to sm_90 (Hopper). A newer GPU needs a newer torch,
+     which pytorch-lightning 1.9.5 may not tolerate."
+  - "If VRAM differs from the node a run started on, the batch size changes and the lr
+     should be rescaled -- resuming with a different effective batch is a real
+     discontinuity, not a free continuation."
