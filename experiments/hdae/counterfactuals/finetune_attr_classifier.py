@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 """Train an image-space multi-label CelebA attribute classifier for CF scoring."""
+import os
 import argparse, logging, sys
 from pathlib import Path
 
@@ -34,8 +35,9 @@ def log_worst_attributes(val, k=10):
 
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument("--config", default="/home/anajibi/HDM/experiments/hdae/configs/hier_k1.yaml")
-    p.add_argument("--output", default="/home/anajibi/HDM/experiments/hdae/outputs/finetuned_attr_classifier.pt")
+    _REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+    p.add_argument("--config", default=os.path.join(_REPO_ROOT, "experiments/hdae/configs/hier_k1.yaml"))
+    p.add_argument("--output", default=os.path.join(_REPO_ROOT, "experiments/hdae/outputs/finetuned_attr_classifier.pt"))
     p.add_argument("--epochs", type=int, default=60)
     p.add_argument("--batch-size", type=int, default=256)
     p.add_argument("--num-workers", type=int, default=8)

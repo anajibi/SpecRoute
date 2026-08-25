@@ -5,6 +5,7 @@ The script is intentionally a transparent orchestrator around the individual
 entrypoints. It logs every subprocess command and skips stages whose expected
 outputs already exist, so long runs are restartable and inspectable.
 """
+import os
 import argparse
 import logging
 import subprocess
@@ -33,7 +34,9 @@ def run(cmd, *, outputs=(), force=False, skip=False, reason=""):
 
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument("--config", default="/home/anajibi/HDM/experiments/hdae/configs/hier_k5.yaml")
+    p.add_argument("--config", default=os.path.join(
+        os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")),
+        "experiments/hdae/configs/hier_k5.yaml"))
     p.add_argument("--output-dir", default=None)
     p.add_argument("--ckpt", default=None,
                    help="Existing HDAE checkpoint. If omitted, train.py is run and last.ckpt is used.")

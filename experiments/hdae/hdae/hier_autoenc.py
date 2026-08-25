@@ -32,12 +32,18 @@ class HierarchicalAutoencModel(BeatGANsAutoencModel):
         self.encoder = HierarchicalSemanticEncoder(enc_conf, e.hier_tap_block_ids, e.hier_level_dims)
         if e.cond_specs and fusion == "concat_film":
             self.attr_embedding = ConcatAttributeEmbedding(e.cond_specs, e.attr_embed_dim, e.attr_dropout_prob,
-                                                            hdae_conf.conditioning.cfg_drop_prob)
+                                                            hdae_conf.conditioning.cfg_drop_prob,
+                                                            fourier_freqs=e.fourier_freqs,
+                                                            fourier_max_freq=e.fourier_max_freq,
+                                                            attr_norm=e.attr_norm)
             self.per_block_style = PerBlockStyleFiLM(e.hier_level_dims, e.hier_block_to_level,
                                                       e.attr_embed_dim, conf.embed_channels)
         elif e.cond_specs:
             self.attr_embedding = MixedAttributeEmbedding(e.cond_specs, e.attr_embed_dim, e.attr_dropout_prob,
-                                                           hdae_conf.conditioning.cfg_drop_prob)
+                                                           hdae_conf.conditioning.cfg_drop_prob,
+                                                           fourier_freqs=e.fourier_freqs,
+                                                           fourier_max_freq=e.fourier_max_freq,
+                                                           attr_norm=e.attr_norm)
             self.per_block_style = PerBlockStyle(e.hier_level_dims, e.hier_block_to_level,
                                                  e.attr_embed_dim, conf.embed_channels)
         else:

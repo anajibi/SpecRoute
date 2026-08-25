@@ -1,3 +1,4 @@
+import os
 import logging
 from pathlib import Path
 
@@ -157,7 +158,9 @@ def save_classifier(path, model, attribute_names, image_size, metrics=None, thre
 
 
 def load_classifier(checkpoint_path=None, device="cpu"):
-    checkpoint_path = checkpoint_path or "/home/anajibi/HDM/experiments/hdae/outputs/finetuned_attr_classifier.pt"
+    checkpoint_path = checkpoint_path or os.path.join(
+        os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")),
+        "experiments/hdae/outputs/finetuned_attr_classifier.pt")
     logging.info("Loading attribute classifier from %s", checkpoint_path)
     checkpoint = torch.load(checkpoint_path, map_location="cpu")
     attribute_names = checkpoint["attribute_names"]

@@ -12,8 +12,23 @@ class HDAELitModule(LitModel):
         return None
 
     def _conditioning_attr_indices(self):
+        """Column indices in batch["attr"] for the conditioning attributes, in config order.
+
+        A vector-valued attribute (AttrCondSpec.dim > 1, e.g. Causal3DIdent's 3-D pos_obj)
+        occupies `dim` consecutive dataset columns named "<attr>_0..<attr>_{dim-1}"; a scalar
+        attribute is looked up by its bare name exactly as before.
+        """
         names = self.trainer.datamodule.attribute_names
-        return [names.index(name) for name in self.model.hdae_conf.encoder.conditioning_attrs]
+        e = self.model.hdae_conf.encoder
+        dims = {sp.name: int(getattr(sp, "dim", 1)) for sp in (e.cond_specs or [])}
+        idx = []
+        for name in e.conditioning_attrs:
+            d = dims.get(name, 1)
+            if d == 1:
+                idx.append(names.index(name))
+            else:
+                idx.extend(names.index(f"{name}_{j}") for j in range(d))
+        return idx
 
     def _batch_y_idx(self, batch):
         e = self.model.hdae_conf.encoder

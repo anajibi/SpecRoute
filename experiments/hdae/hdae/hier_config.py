@@ -28,6 +28,16 @@ class EncoderHierarchyConfig:
     # AttributeEmbedding. Left None/empty, behavior is unchanged (existing CelebA binary configs).
     causal_graph_path: Optional[str] = None
     cond_specs: List = field(default_factory=list, repr=False)
+    # Fourier features for CONTINUOUS conditioning attributes. 0 = off (bare normalized value
+    # into a Linear, the original behavior). >0 emits 2*n sin/cos features per component plus
+    # the raw value, matching how upstream embeds the continuous diffusion timestep -- a bare
+    # scalar through a Linear gives neighbouring values near-identical embeddings, so the
+    # attribute-CFG delta is tiny and continuous attributes under-edit.
+    fourier_freqs: int = 0
+    fourier_max_freq: float = 1000.0
+    # Per-attribute RMSNorm (learnable gain) on each attribute's embedding before fusion, so no
+    # attribute dominates the fused vector by raw magnitude alone. False = off (original).
+    attr_norm: bool = False
 
     @property
     def level_dims(self):

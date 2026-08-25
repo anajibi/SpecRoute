@@ -1,9 +1,11 @@
 """YAML-to-upstream TrainConfig bridge."""
+import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-sys.path.append("/home/anajibi/HDM/diffae_upstream")
+_REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+sys.path.append(os.path.join(_REPO_ROOT, "diffae_upstream"))
 
 import yaml
 import templates
@@ -52,7 +54,7 @@ def load_hdae_config(path, require_data=True):
         hdae.encoder.cond_specs = load_cond_specs(hdae.encoder.causal_graph_path, hdae.encoder.conditioning_attrs)
     conf.hdae_conf = hdae
     conf.make_model_conf()
-    data_key = "h5_path" if raw["data"].get("type") == "morphomnist" else "lmdb_path"
+    data_key = "h5_path" if raw["data"].get("type") in ("morphomnist", "causal3dident") else "lmdb_path"
     if require_data and not Path(raw["data"][data_key]).exists():
         raise FileNotFoundError(
             f"Packed data missing. Run: python experiments/hdae/scripts/preprocess_data.py --config {path}")

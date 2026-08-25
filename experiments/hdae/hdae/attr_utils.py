@@ -70,13 +70,19 @@ def to_cond_values(y_raw: torch.Tensor, specs: Sequence) -> torch.Tensor:
     if torch.isnan(y_raw.float()).any():
         raise ValueError(f"attribute tensor contains NaN; observed={observed_unique(y_raw)}")
     out = y_raw.clone().float()
-    for i, spec in enumerate(specs):
-        col = y_raw[:, i]
+    c = 0
+    for spec in specs:
+        d = int(getattr(spec, "dim", 1))          # vector attrs span `dim` consecutive columns
+        sl = y_raw[:, c:c + d]
         if spec.kind == "categorical":
             if spec.lo is not None and spec.hi is not None:
-                out[:, i] = col.clamp(spec.lo, spec.hi)
+                out[:, c:c + d] = sl.clamp(spec.lo, spec.hi)
             else:
-                out[:, i] = col.round().clamp(0, spec.num_classes - 1)
+                out[:, c:c + d] = sl.round().clamp(0, spec.num_classes - 1)
         else:
-            out[:, i] = col.clamp(spec.lo, spec.hi)
+            out[:, c:c + d] = sl.clamp(spec.lo, spec.hi)
+        c += d
+    if c != y_raw.shape[1]:
+        raise ValueError(f"specs span {c} columns but got {y_raw.shape[1]}; "
+                         "check conditioning_attrs / cond_specs dims")
     return out

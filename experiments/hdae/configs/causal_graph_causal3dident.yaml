@@ -1,0 +1,62 @@
+# Causal DAG over Causal3DIdent's modeled attributes.
+# Shape mirrors configs/causal_graph_morpho.yaml (attributes / edges / nodes /
+# scm_checkpoint), extended with a per-node `dim` because two of this dataset's
+# attributes are vector-valued -- unlike CelebA's binary attrs and MorphoMNIST's
+# scalar ones, which is why this graph is trained by the self-contained
+# causal/train_scm_causal3dident.py rather than causal/train_scm.py (that SCM is
+# scalar-per-node; see causal/scm.py's module docstring).
+#
+# Causal3DIdent ships 10 raw latent columns which group into 7 attributes:
+#   pos_obj (3: x,y,z)  rot_obj (3: alpha,beta,gamma)  pos_spl (1)
+#   hue_obj (1)  hue_spl (1)  hue_bg (1)  class (1, the object identity 0..6)
+# We model 4 of those 7; the remaining 3 are unmodeled (see `unmodeled` below)
+# and are the FC_unobserved pool for CF1, exactly as the 36 non-conditioning
+# CelebA attributes are in configs/causal_graph.yaml.
+
+attributes: [class, pos_spl, pos_obj, rot_obj]
+
+edges:
+  - [class, rot_obj]
+  - [class, pos_obj]
+  - [pos_spl, pos_obj]
+
+# Roots: class, pos_spl. Topological order: class, pos_spl, rot_obj, pos_obj.
+# pos_obj is the only node with two parents.
+
+nodes:
+  class:
+    kind: categorical
+    num_classes: 7
+    dim: 1
+    # Raw storage IS the class index (0..6, one raw_latents_{i}.npy per class),
+    # so no `range` -- same convention as MorphoMNIST's `digit`. Root node, which
+    # satisfies the SCM's root-categorical-only restriction (a parent-conditioned
+    # categorical node would need Gumbel-max abduction).
+    class_names: [teapot, hare, dragon, cow, armadillo, horse, head]
+  pos_spl:
+    kind: continuous
+    dim: 1
+    range: [-1.0, 1.0]   # raw_latents are already bounded to [-1, 1]; min-max map is the identity
+  pos_obj:
+    kind: continuous
+    dim: 3               # raw latent columns 0,1,2 = x,y,z
+    range: [-1.0, 1.0]
+  rot_obj:
+    kind: continuous
+    dim: 3               # raw latent columns 3,4,5 = alpha,beta,gamma
+    range: [-1.0, 1.0]
+
+# Structurally unmodeled -- outside the declared graph, no causal claim made.
+unmodeled: [hue_obj, hue_spl, hue_bg]
+
+# Raw latent column layout of raw_latents_{i}.npy (10 columns).
+latent_columns:
+  pos_obj: [0, 1, 2]
+  rot_obj: [3, 4, 5]
+  pos_spl: [6]
+  hue_obj: [7]
+  hue_spl: [8]
+  hue_bg:  [9]
+
+data_root: experiments/hdae/data/causal3dident
+scm_checkpoint: experiments/hdae/outputs/scm/causal3dident_scm.pt

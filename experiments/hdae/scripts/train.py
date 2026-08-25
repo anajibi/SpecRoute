@@ -24,6 +24,7 @@ from experiments.hdae.hdae.config_io import load_hdae_config
 from experiments.hdae.hdae.lit_module import HDAELitModule
 from experiments.hdae.data.datamodule import CelebAHQDataModule
 from experiments.hdae.data.morpho_datamodule import MorphoMNISTDataModule
+from experiments.hdae.data.causal3dident_datamodule import Causal3DIdentDataModule
 
 
 # --- Execution Logic Encapsulated ---
@@ -40,7 +41,17 @@ def main():
     d = cfg.raw['data']
     t = cfg.raw['train']
 
-    if d.get('type') == 'morphomnist':
+    if d.get('type') == 'causal3dident':
+        dm = Causal3DIdentDataModule(
+            d['h5_path'],
+            test_h5_path=d.get('test_h5_path'),
+            batch_size=t['batch_size_per_gpu'],
+            num_workers=t['num_workers'],
+            val_frac=d.get('val_frac', 0.02),
+            preload_images=d.get('preload_images', False),
+            seed=cfg.raw.get('seed', 0),
+        )
+    elif d.get('type') == 'morphomnist':
         dm = MorphoMNISTDataModule(
             d['h5_path'],
             t['batch_size_per_gpu'],

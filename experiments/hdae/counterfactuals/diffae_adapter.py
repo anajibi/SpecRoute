@@ -16,13 +16,15 @@ That trades reconstruction/edit quality (upsampled input, domain mismatch)
 for genericity -- it validates the contract, not this checkpoint's edit
 quality.
 """
+import os
 import sys
 
 import torch
 import torch.nn.functional as F
 import yaml
 
-sys.path.append("/home/anajibi/HDM/diffae_upstream")
+_REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+sys.path.append(os.path.join(_REPO_ROOT, "diffae_upstream"))
 import templates  # noqa: E402
 from experiment import LitModel  # noqa: E402
 
