@@ -1,0 +1,88 @@
+# FINAL ARCHITECTURE for the full-length Causal3DIdent run (was arm C of the ablation).
+#
+# Conditioning: Fourier features on continuous attributes AND per-attribute RMSNorm, fused
+# with concat_film. Chosen on two measurements over the three ablation arms (all k=1, same
+# data, same seed), at 50k/42k/50k steps:
+#
+#   arm            recon PSNR   LPIPS     dL_all    cfg_delta
+#   A fourier         32.57     0.0226    0.00078     0.0155
+#   B rmsnorm         30.38     0.0204    0.00173     0.0265
+#   C both  <-        37.74     0.0106    0.00363     0.0371
+#
+# dL_all = L(attrs nulled) - L(true attrs): how much the conditioning signal is worth to
+# the denoiser. C wins on every axis. Caveat kept visible: C also saw 2x the images of A
+# and 2.4x of B, so its reconstruction lead is partly training volume. What is NOT
+# explained by volume is A vs B -- matched batch/lr/seed, and B beat A on conditioning by
+# 2.2x from a 16% step DEFICIT. So RMSNorm carries more conditioning value than Fourier
+# does, and dropping it would be the wrong economy. C contains both.
+#
+# Budget: ffhq128_autoenc_base (this file's base_template) declares
+# total_samples = 10,000,000. At batch 32 that is 312,500 steps = 40.5 epochs over the
+# 246,960-image train split. Arm C's existing checkpoint covers the first 50,000 steps.
+#
+# batch/lr are UNCHANGED from arm C's run so resuming its checkpoint is a true
+# continuation rather than a recipe change mid-flight.
+#
+# Three-arm conditioning ablation: the arms differ ONLY in encoder.fourier_freqs and
+# encoder.attr_norm. Everything else -- seed, data, batch, lr, steps, architecture -- is
+# identical, so any difference between them is attributable to the conditioning change.
+#
+# Motivation: continuous attributes score far worse on CC than categorical ones at the same
+# guidance scale. A bare Linear(1,d) maps a continuous attribute's whole range onto a smooth,
+# nearly affine curve, so neighbouring values get near-identical embeddings and the
+# attribute-CFG delta e(target)-e(null) is tiny. Measured at init on this attribute set, the
+# embedding displacement for a class flip vs a small pos_spl change differs by ~1200x with the
+# bare Linear; Fourier features close that to ~14x and Fourier+RMSNorm to ~1.7x.
+base_template: ffhq128_autoenc_base
+data:
+  type: causal3dident
+  h5_path: "experiments/hdae/data/causal3dident/causal3dident_trainset_128.h5"
+  test_h5_path: "experiments/hdae/data/causal3dident/causal3dident_testset_128.h5"
+  image_size: 128
+  val_frac: 0.02          # carved from the 252k trainset; the shipped 25.2k testset stays untouched
+  preload_images: false   # 13.5GB file; the OS page cache holds it after the first epoch
+encoder:
+  type: hierarchical
+  # k=1: a single mid-level tap, all decoder blocks conditioned on that one level.
+  hier_tap_block_ids: [mid]
+  hier_level_dims: [512]
+  hier_block_to_level: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+  n_decoder_output_blocks: 15   # ffhq128_autoenc_base: output_num_blocks = [3,3,3,3,3]
+  n_attributes: 4
+  # 4 modelled attributes; pos_obj/rot_obj are VECTOR-valued (dim 3 each, declared in the causal
+  # graph), so these 4 names span 8 raw dataset columns. hue_obj/hue_spl/hue_bg stay unmodelled.
+  conditioning_attrs: [class, pos_spl, pos_obj, rot_obj]
+  causal_graph_path: "experiments/hdae/configs/causal_graph_causal3dident.yaml"
+  attr_embed_dim: 128     # concat_film: 128 / 4 attrs = 32-dim protected slice each
+  attr_dropout_prob: 0.08
+  fourier_freqs: 16          # 16 log-spaced sin/cos frequencies + raw value passthrough
+  fourier_max_freq: 1000.0
+  attr_norm: true          # per-attribute RMSNorm with learnable gain, all attributes
+  hier_proj: linear
+conditioning:
+  strategy: per_block_attr
+  style_ch: 512
+  latent_drop_prob: 0.0
+  cfg_drop_prob: 0.1
+  cfg_guidance_scale: 3.0
+  attr_fusion: concat_film
+train:
+  batch_size_per_gpu: 32
+  total_batch_size: 32
+  lr: 0.0001
+  ema_decay: 0.9999
+  T: 1000
+  T_eval: 100
+  max_steps: 312500   # 10,000,000 samples at batch 32 -- the template's own total_samples
+  precision: 16-mixed
+  grad_clip: 1.0
+  num_workers: 4
+  compile: false
+lightning:
+  accelerator: gpu
+  devices: 1
+  strategy: auto
+  log_every_n_steps: 50
+  val_check_interval: 2000
+seed: 42                  # identical across all three arms
+output_dir: experiments/hdae/outputs/c3di_k1_final
