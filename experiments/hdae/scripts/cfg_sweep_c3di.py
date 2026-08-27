@@ -105,6 +105,9 @@ def main():
     ap.add_argument("--min-delta", type=float, default=0.5)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--outdir", default=os.path.join(REPO, "experiments/hdae/outputs/cfg_sweep"))
+    ap.add_argument("--attr-g", nargs="+", default=None, metavar="ATTR=G",
+                    help="run each intervention at ONE strength, e.g. class=8 pos_obj=2. "
+                         "Cheaper than a sweep once the optimum is known.")
     ap.add_argument("--fp16", action="store_true",
                     help="run the diffusion loop under autocast fp16; verify metrics before trusting")
     ap.add_argument("--compile", action="store_true",
@@ -115,6 +118,15 @@ def main():
                     help="rows to render in the contact sheet; 0 skips grids entirely")
     ap.add_argument("--device", default="cuda")
     args = ap.parse_args()
+    per_attr_g = None
+    if args.attr_g:
+        per_attr_g = {}
+        for kv in args.attr_g:
+            k, v = kv.split("=")
+            per_attr_g[k] = [float(v)]
+        missing = [a for a in MODELLED if a not in per_attr_g]
+        if missing:
+            raise SystemExit(f"--attr-g must cover every modelled attribute; missing {missing}")
     dev = torch.device(args.device)
     os.makedirs(args.outdir, exist_ok=True)
     torch.manual_seed(args.seed); rng = np.random.RandomState(args.seed)
@@ -212,7 +224,7 @@ def main():
                 y_cf = y.clone()
                 for k in MODELLED:
                     y_cf[:, COLS[k]] = cfa[k].to(y.dtype)
-            for g in args.strengths:
+            for g in (per_attr_g[a] if per_attr_g else args.strengths):
                 m = net if g == 1.0 else AttributeCFGWrapper(net, g).to(dev).eval()
                 t0 = time.time()
                 img = render(net, m, y_cf, x_T, zs)

@@ -1,0 +1,91 @@
+# EXTENSION RUN: k11 continued from epoch 50 to epoch 75.
+#
+# WHY 75. Fitting L(e) = a*e^-b + c to the first 50 epochs of both runs:
+#
+#   k=1    L(e) = 0.0038384 * e^-0.5026 + 0.00073749   floor 0.000737
+#   k=11   L(e) = 0.0027124 * e^-0.2982 + 0.00047204   floor 0.000472
+#
+# Both are already below 0.5% loss improvement per epoch at epoch 50 (k=1 0.424%, k=11 0.383%).
+# They cross 0.25%/epoch at epoch 75 and 73 respectively, so 75 is where the stricter criterion
+# is met for both. k=11 has the LOWER floor but the SHALLOWER exponent -- it improves more slowly
+# toward a better asymptote, with 63.4% of its current loss still reducible against k=1's 41.5%.
+# Those projections extrapolate 50% beyond the observed range and the floor is the least
+# identifiable parameter of the three; treat them as a plan, not a prediction.
+#
+# k=11 continues at 2e-4 throughout, unchanged from its first 50 epochs.
+#
+# THE ORIGINAL CHECKPOINTS ARE NOT TOUCHED. This run writes to a NEW output_dir seeded with a
+# COPY of the epoch-50 checkpoint. Every prior checkpoint (both finals, all six intermediates)
+# is verified byte-identical in s3 under checkpoints/c3di-v2-validated-20260827/ by multipart
+# ETag, not merely by size.
+#
+# Budget: 289406 steps = 75 epochs of samples, up from 192937 at 50.
+# Checkpoints every 23,148 steps = 6 epochs, so the metric-versus-epoch curve keeps its cadence.
+#
+base_template: ffhq128_autoenc_base
+data:
+  type: causal3dident
+  scm_checkpoint: experiments/hdae/outputs/scm/causal3dident_scm_spline.pt
+  h5_path: "experiments/hdae/data/causal3dident/causal3dident_trainset_128.h5"
+  test_h5_path: "experiments/hdae/data/causal3dident/causal3dident_testset_128.h5"
+  image_size: 128
+  val_frac: 0.02          # carved from the 252k trainset; the shipped 25.2k testset stays untouched
+  preload_images: false   # 13.5GB file; the OS page cache holds it after the first epoch
+encoder:
+  type: hierarchical
+  # k=11: eleven taps spanning the encoder, 128x128 down to 4x4 (encoder has 18 input
+  # blocks, ids 0..17, plus "mid"). The 512-d semantic budget is split across all eleven
+  # levels (6x47 + 5x46 = 512) rather than concentrated in one, so this trades per-level
+  # capacity for resolution-ordered structure. 15 decoder output blocks map onto the 11
+  # levels sequentially with the last repeated, matching the morpho_hier_k11 convention.
+  hier_tap_block_ids: [0, 2, 4, 6, 8, 10, 12, 14, 15, 16, mid]
+  hier_level_dims: [47, 47, 47, 47, 47, 47, 46, 46, 46, 46, 46]
+  hier_block_to_level: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 10, 10, 10, 10]
+  n_decoder_output_blocks: 15   # ffhq128_autoenc_base: output_num_blocks = [3,3,3,3,3]
+  n_attributes: 4
+  # 4 modelled attributes; pos_obj/rot_obj are VECTOR-valued (dim 3 each, declared in the causal
+  # graph), so these 4 names span 8 raw dataset columns. hue_obj/hue_spl/hue_bg stay unmodelled.
+  conditioning_attrs: [class, pos_spl, pos_obj, rot_obj]
+  causal_graph_path: "experiments/hdae/configs/causal_graph_causal3dident.yaml"
+  attr_embed_dim: 128     # concat_film: 128 / 4 attrs = 32-dim protected slice each
+  attr_dropout_prob: 0.08
+  fourier_freqs: 16          # 16 log-spaced sin/cos frequencies + raw value passthrough
+  fourier_max_freq: 1000.0
+  attr_norm: true          # per-attribute RMSNorm with learnable gain, all attributes
+  hier_proj: linear
+conditioning:
+  strategy: per_block_attr
+  style_ch: 512
+  latent_drop_prob: 0.0
+  cfg_drop_prob: 0.1
+  cfg_guidance_scale: 3.0
+  attr_fusion: concat_film
+train:
+  batch_size_per_gpu: 64
+  total_batch_size: 64
+  lr: 0.0002    # linear scaling from the working 1e-4 @ batch 32
+  ema_decay: 0.9999
+  T: 1000
+  T_eval: 100
+  max_steps: 289406   # 75 epochs of samples (was 50); +96,469 steps at batch 64
+  precision: 16-mixed
+  grad_clip: 1.0
+  num_workers: 4
+  # 4 checkpoints across the run: 192,937 / 4 = 48,234 steps apart, save_top_k -1 keeps
+  # them all (~2.1GB each). Gives rollback points -- the MorphoMNIST run regressed between
+  # 30k and 45k steps, and with only `last.ckpt` there was nothing to fall back to.
+  checkpoint_every_n_steps: 23148   # every 6 epochs (3,858 steps/epoch at batch 64)
+  save_top_k: -1
+  # Reconstruction + counterfactual grids into TensorBoard every 3 epochs, so conditioning
+  # can be watched while the run is live rather than only at the end.
+  log_images_every_n_epochs: 3
+  log_images_n: 8
+  compile: true    # torch.compile on a side handle; self.model stays uncompiled (see lit_module.enable_compile)
+lightning:
+  accelerator: gpu
+  devices: 1
+  strategy: auto
+  log_every_n_steps: 50
+  val_check_interval: 1929   # half an epoch (3,858 batches/epoch) -> 100 validation points
+seed: 42                  # identical across all three arms
+output_dir: experiments/hdae/outputs/c3di_k11_ext75
