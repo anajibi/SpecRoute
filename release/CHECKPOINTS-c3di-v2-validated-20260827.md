@@ -76,3 +76,46 @@ T=50, not T=100. Measured equivalent on the same cohort (k=11, g=3): class 100.0
 (inside that cell's bootstrap CI), at exactly half the cost. T=25 was tested and REJECTED:
 pos_obj degrades 49%, pos_spl 41%. `--fp16` gives 0% (the loop is memory-bound, not
 matmul-bound) and `--compile` produces NaNs and is slower. Do not re-try either.
+
+---
+
+## Correction, 2026-08-27: k=11 `do(class)` is not 100%
+
+The headline table above reports k=11 reaching 100.00% on `do(class)`. That figure came from a
+256-image cohort, and it is a saturation artifact. Re-measured on 1024 images:
+
+| g | n=256, T=100 | n=1024, T=50 | failures at n=1024 |
+|--:|-------------:|-------------:|-------------------:|
+| 3 |     100.00%  |    **99.32%**|            7 / 1024 |
+| 5 |     100.00%  |    **99.51%**|            5 / 1024 |
+| 8 |     100.00%  |    **99.80%**|            2 / 1024 |
+
+256 consecutive successes produce a bootstrap CI of exactly [1.0000, 1.0000] -- an interval with
+no width, which is not evidence of certainty but evidence the cohort was too small to contain a
+failure. The larger draw contains them.
+
+Two consequences:
+
+* k=11's `do(class)` does NOT saturate at g=3. It keeps improving to g=8 (96.97% at g=1 ->
+  99.80% at g=8), so the "tied from g=1.5 through 12" result in best_g.json is an artifact of the
+  zero-width interval and will change when recomputed.
+* The k=11 advantage over k=1 on `do(class)` is +11.0 points, not +11.7.
+
+This is a correction to the measurement, not to the ordering. Everything else held: across 19
+matched cells, 15 fell inside the interval the small cohort predicted, and the mean change per
+attribute was -0.2% (class), -3.9% (pos_spl), +7.0% (pos_obj) -- opposite signs, so the residual
+is cohort sampling, not the T=100 -> T=50 change. T was isolated separately on an identical
+cohort and contributes at most ~1.5% on pos_obj and nothing elsewhere.
+
+## Convergence status at this tag: NOT converged
+
+Neither model has a learning-rate scheduler, and k=1's training loss is still falling at the last
+step -- mean loss over the final six deciles of training: 0.001585, 0.001543, 0.001503, 0.001476,
+0.001453, 0.001412. The last decile is 2.8% below the one before it. Whether that translates into
+better counterfactuals is a separate question, and it is answerable from the intermediate
+checkpoints already on disk:
+
+    k=1   epochs  8, 22, 36, 50   (steps 54484, 108968, 163452, 217936)
+    k=11  epochs 12, 25, 37, 50   (steps 48234, 96468, 144702, 192936)
+
+Evaluating those eight gives the metric-versus-epoch curve to 50 epochs with no further training.
