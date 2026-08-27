@@ -51,14 +51,22 @@ instrument noise were indistinguishable.
 import torch
 from torchvision.models import convnext_tiny
 blob = torch.load("predictors/pos_obj.pt", map_location="cpu")
+# The checkpoints were saved from a wrapper holding `self.net = convnext_tiny(...)`, so
+# every key carries a `net.` prefix. Strip it or load_state_dict raises with ~350
+# missing/unexpected keys. (It fails loudly, not silently -- but it does fail.)
+sd = {k[len("net."):] if k.startswith("net.") else k: v
+      for k, v in blob["state_dict"].items()}
 m = convnext_tiny()
-m.classifier[2] = torch.nn.Sequential(torch.nn.Dropout(0.2),
+m.classifier[2] = torch.nn.Sequential(torch.nn.Dropout(0.0),
                                       torch.nn.Linear(768, blob["out_dim"]))
-m.load_state_dict(blob["state_dict"]); m.eval()
+m.load_state_dict(sd); m.eval()
 # blob also carries: attr, kind, cols (dataset columns), img_size, val_metrics, test_metrics, args
 ```
 Inputs are 128x128, ImageNet-normalised: `x = (img_in_[-1,1] + 1)/2`, then subtract
-mean `[0.485,0.456,0.406]` / divide std `[0.229,0.224,0.225]`.
+mean `[0.485,0.456,0.406]` / divide std `[0.229,0.224,0.225]`. Verified end to end on a
+256-image cohort: every predictor reproduces its test metric, and prediction ranges track
+truth ranges with no scale or offset error. Feeding a `[0,1]` image straight in (skipping
+the `+1)/2` step) silently halves the contrast rather than erroring -- check the range.
 
 **Caveat worth carrying forward:** `hue_obj` is the weakest at R2 0.947 (MAE 0.0739, ~14%
 of its target sd) because object hue lives in a small number of pixels on a small object,

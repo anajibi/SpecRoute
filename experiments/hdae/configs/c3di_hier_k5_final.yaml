@@ -1,0 +1,143 @@
+# FULL-LENGTH Causal3DIdent run: arm C conditioning at k=5, TRAINED FROM SCRATCH.
+#
+# The middle rung of the depth ladder. k=1 and k=11 are both finished at 50 epochs on this
+# exact recipe; this run exists to say whether the k=1 -> k=11 gap is monotone in the number
+# of taps or whether most of it is bought by the first few. Measured at 256 test images,
+# each model at its own best guidance strength:
+#
+#   attribute      k=1              k=11             ratio
+#   do(class)      88.28% @ g=8     100.00% @ g=3    +11.7 pts
+#   do(pos_spl)    0.0394  @ g=2    0.0214  @ g=2    1.84x
+#   do(pos_obj)    0.1933  @ g=8    0.0300  @ g=2    6.44x
+#   do(rot_obj)    0.1751  @ g=8    0.0790  @ g=3    2.22x
+#
+# k=5 taps [0, 4, 8, 12, mid]: five levels evenly spaced over the same span k=11 covers
+# (encoder block 0 at 128x128 through mid at the bottleneck), and every one of them is also
+# a k=11 tap, so the three models form a NESTED ladder rather than three unrelated tap
+# layouts. The 512-d semantic budget splits 2x103 + 3x102 = 512, the same
+# largest-levels-first rule k=11 uses (6x47 + 5x46). 15 decoder output blocks map 3-per-level,
+# following the morpho_hier_k5 convention.
+#
+# EVERYTHING ELSE IS IDENTICAL to c3di_hier_k11_final: same seed (42), same data, same
+# batch (64), same lr (2e-4), same 50-epoch budget (192,937 steps = 12,348,000 samples),
+# same compile, same checkpoint cadence. The ONLY difference from k=11 is the three
+# encoder.hier_* lines and the output directory, so any difference in the result is
+# attributable to tap count.
+#
+# CAVEAT INHERITED FROM THE LADDER: k=1 ran at lr 1e-4, not the configured 2e-4, because its
+# run resumed from an earlier checkpoint and Lightning restored that optimiser state. k=5 and
+# k=11 both run at 2e-4 from scratch, so k=5 vs k=11 is a CLEAN comparison; k=1 is the one
+# rung with a confound.
+#
+# Conditioning: Fourier features on continuous attributes AND per-attribute RMSNorm, fused
+# with concat_film (arm C). Chosen on two measurements over the three ablation arms (all
+# k=1, same data, same seed), at 50k/42k/50k steps:
+#
+#   arm            recon PSNR   LPIPS     dL_all    cfg_delta
+#   A fourier         32.57     0.0226    0.00078     0.0155
+#   B rmsnorm         30.38     0.0204    0.00173     0.0265
+#   C both  <-        37.74     0.0106    0.00363     0.0371
+#
+# dL_all = L(attrs nulled) - L(true attrs): how much the conditioning signal is worth to
+# the denoiser. C wins on every axis. Caveat kept visible: C also saw 2x the images of A
+# and 2.4x of B, so its reconstruction lead is partly training volume. What is NOT
+# explained by volume is A vs B -- matched batch/lr/seed, and B beat A on conditioning by
+# 2.2x from a 16% step DEFICIT. So RMSNorm carries more conditioning value than Fourier
+# does, and dropping it would be the wrong economy. C contains both.
+#
+# Budget: 50 epochs = 12,348,000 samples over the 246,960-image train split
+# = 257,250 steps at batch 48. That is 1.2x the ffhq128_autoenc_base template's declared
+# total_samples of 10,000,000. From scratch -- no k=11 checkpoint exists to resume.
+#
+# Batch 64 / lr 2e-4 with torch.compile. Compile measured at 1.334x (93.4 -> 124.5 img/s)
+# AND 8GB cheaper (31.7 -> 23.6 GiB at batch 48) because it fuses ops and drops
+# intermediates -- which is what makes batch 64 fit at all. Projected ~31.5 GiB of 39.5.
+#
+# Profiled on the target A100, k=11 is GPU-BOUND at every batch size
+# (real loop hits 99.5% of the cached-batch ceiling, ~0% time waiting on data, loader
+# supplies 6700 img/s against a 98 img/s demand). Because it is compute-bound rather than
+# launch-bound, raising the batch buys almost nothing in wall-clock:
+#
+#   batch 32 -> 92.6 img/s, 22.1 GiB   (uncompiled)
+#   batch 48 -> 97.5 img/s, 31.7 GiB   (uncompiled; 64 OOMed uncompiled)
+#   batch 48 -> 124.5 img/s, 23.6 GiB  (COMPILED)
+# so batch size buys little on its own -- the GPU is compute-bound, not launch-bound --
+# and compile is where the real speedup comes from. 50 epochs: ~27.6 h.
+# PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True is REQUIRED at batch 64.
+#
+# Three-arm conditioning ablation: the arms differ ONLY in encoder.fourier_freqs and
+# encoder.attr_norm. Everything else -- seed, data, batch, lr, steps, architecture -- is
+# identical, so any difference between them is attributable to the conditioning change.
+#
+# Motivation: continuous attributes score far worse on CC than categorical ones at the same
+# guidance scale. A bare Linear(1,d) maps a continuous attribute's whole range onto a smooth,
+# nearly affine curve, so neighbouring values get near-identical embeddings and the
+# attribute-CFG delta e(target)-e(null) is tiny. Measured at init on this attribute set, the
+# embedding displacement for a class flip vs a small pos_spl change differs by ~1200x with the
+# bare Linear; Fourier features close that to ~14x and Fourier+RMSNorm to ~1.7x.
+base_template: ffhq128_autoenc_base
+data:
+  type: causal3dident
+  scm_checkpoint: experiments/hdae/outputs/scm/causal3dident_scm_spline.pt
+  h5_path: "experiments/hdae/data/causal3dident/causal3dident_trainset_128.h5"
+  test_h5_path: "experiments/hdae/data/causal3dident/causal3dident_testset_128.h5"
+  image_size: 128
+  val_frac: 0.02          # carved from the 252k trainset; the shipped 25.2k testset stays untouched
+  preload_images: false   # 13.5GB file; the OS page cache holds it after the first epoch
+encoder:
+  type: hierarchical
+  # k=5: five taps evenly spaced over the same span k=11 covers (encoder has 18 input
+  # blocks, ids 0..17, plus "mid"); all five are also k=11 taps, so the ladder is nested.
+  # The 512-d semantic budget splits 2x103 + 3x102 = 512, giving each level ~2.2x the
+  # capacity a k=11 level gets. 15 decoder output blocks map 3-per-level.
+  hier_tap_block_ids: [0, 4, 8, 12, mid]
+  hier_level_dims: [103, 103, 102, 102, 102]
+  hier_block_to_level: [0, 0, 0, 1, 1, 1, 2, 2, 2, 3, 3, 3, 4, 4, 4]
+  n_decoder_output_blocks: 15   # ffhq128_autoenc_base: output_num_blocks = [3,3,3,3,3]
+  n_attributes: 4
+  # 4 modelled attributes; pos_obj/rot_obj are VECTOR-valued (dim 3 each, declared in the causal
+  # graph), so these 4 names span 8 raw dataset columns. hue_obj/hue_spl/hue_bg stay unmodelled.
+  conditioning_attrs: [class, pos_spl, pos_obj, rot_obj]
+  causal_graph_path: "experiments/hdae/configs/causal_graph_causal3dident.yaml"
+  attr_embed_dim: 128     # concat_film: 128 / 4 attrs = 32-dim protected slice each
+  attr_dropout_prob: 0.08
+  fourier_freqs: 16          # 16 log-spaced sin/cos frequencies + raw value passthrough
+  fourier_max_freq: 1000.0
+  attr_norm: true          # per-attribute RMSNorm with learnable gain, all attributes
+  hier_proj: linear
+conditioning:
+  strategy: per_block_attr
+  style_ch: 512
+  latent_drop_prob: 0.0
+  cfg_drop_prob: 0.1
+  cfg_guidance_scale: 3.0
+  attr_fusion: concat_film
+train:
+  batch_size_per_gpu: 64
+  total_batch_size: 64
+  lr: 0.0002    # linear scaling from the working 1e-4 @ batch 32
+  ema_decay: 0.9999
+  T: 1000
+  T_eval: 100
+  max_steps: 192937   # 50 epochs = 12,348,000 samples at batch 64
+  precision: 16-mixed
+  grad_clip: 1.0
+  num_workers: 4
+  # 4 checkpoints across the run: 192,937 / 4 = 48,234 steps apart, save_top_k -1 keeps
+  # them all (~2.1GB each). Gives rollback points -- the MorphoMNIST run regressed between
+  # 30k and 45k steps, and with only `last.ckpt` there was nothing to fall back to.
+  checkpoint_every_n_steps: 48234
+  save_top_k: -1
+  # Reconstruction + counterfactual grids into TensorBoard every 3 epochs, so conditioning
+  # can be watched while the run is live rather than only at the end.
+  log_images_every_n_epochs: 3
+  log_images_n: 8
+  compile: true    # torch.compile on a side handle; self.model stays uncompiled (see lit_module.enable_compile)
+lightning:
+  accelerator: gpu
+  devices: 1
+  strategy: auto
+  log_every_n_steps: 50
+  val_check_interval: 1929   # half an epoch (3,858 batches/epoch) -> 100 validation points
+seed: 42                  # identical across all three arms
+output_dir: experiments/hdae/outputs/c3di_k5_final

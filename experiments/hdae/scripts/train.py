@@ -1,5 +1,7 @@
 #!/usr/bin/env python
 import argparse
+import glob
+import re
 import os
 import sys
 from pathlib import Path
@@ -71,13 +73,34 @@ def main():
     out = Path(cfg.raw['output_dir'])
     out.mkdir(parents=True, exist_ok=True)
 
-    checkpoint_path = f'{out}/checkpoints/last.ckpt'
-    print('ckpt path:', checkpoint_path)
-    if os.path.exists(checkpoint_path):
-        resume = checkpoint_path
-        print('resume!')
+    # Resume from the NEWEST checkpoint by global_step, not from a hardcoded last.ckpt.
+    #
+    # Why: if the output dir is seeded with a checkpoint to continue from (as the k=1 run
+    # was), Lightning finds `last.ckpt` already taken and writes its own saves to
+    # `last-v1.ckpt` instead. A restart that trusted `last.ckpt` would then silently rewind
+    # to the seed -- measured here at 50,000 vs the live 86,000, i.e. ~5 hours discarded --
+    # and nothing would look wrong in the logs.
+    def _step_of(path):
+        m = re.search(r'step=(\d+)', os.path.basename(path))
+        if m:
+            return int(m.group(1))
+        try:
+            return int(torch.load(path, map_location='cpu').get('global_step', -1))
+        except Exception:
+            return -1
+
+    ckpt_dir = out / 'checkpoints'
+    cands = sorted(glob.glob(str(ckpt_dir / '*.ckpt')))
+    resume = None
+    if cands:
+        scored = [(_step_of(c), c) for c in cands]
+        scored.sort()
+        best_step, resume = scored[-1]
+        print(f'resuming from {os.path.basename(resume)} (global_step={best_step})')
+        for st, c in scored[:-1]:
+            print(f'  (also present: {os.path.basename(c)} @ {st})')
     else:
-        resume = None
+        print('no checkpoint found -- training from scratch')
 
     # Checkpoint cadence is config-driven: save_top_k=-1 keeps every snapshot, so
     # `checkpoint_every_n_steps` alone decides how many land on disk over the run.
