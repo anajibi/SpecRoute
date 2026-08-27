@@ -99,17 +99,22 @@ def dist(attr, u, v):
     return np.abs(u - v).mean(axis=1)
 
 
-def trivial_baseline(ds, attr, n=20000, seed=0):
+def trivial_baseline(ds, attr):
     """Error of the best CONSTANT predictor -- the strict reading of 'as bad as trivial'.
 
     Continuous: always answer the mean, E|y - ybar|.  Categorical: always answer the mode,
     1 - max_c p(c).  Returned alongside the looser blind-SAMPLER baseline E|y - y'| (Gini
     for the categorical case) so the choice of convention stays visible in the output.
     """
-    rng = np.random.RandomState(seed)
-    A = np.stack([ds[i]["attr"].numpy() for i in
-                  rng.choice(len(ds), min(n, len(ds)), replace=False)])
-    v = A[:, COLS[attr]]
+    # The WHOLE test split, not a subsample. This baseline is a definitional constant of
+    # the dataset -- estimating it from 20k of 25.2k rows injected sampling noise into a
+    # number that has an exact value (it made the balanced-class mode error read 0.8556
+    # instead of 6/7 = 0.857143).
+    #
+    # ds.attr is the full attribute matrix, built once in the dataset constructor. Do NOT
+    # go through ds[i]: __getitem__ decodes a 128x128 image per call, so pulling rows that
+    # way costs one image decode and one random HDF5 read per row, all discarded.
+    v = np.asarray(ds.attr[:, COLS[attr]], dtype=np.float64)
     if attr == "class":
         p = np.bincount(v.reshape(-1).astype(int), minlength=N_CLASS) / len(v)
         return float(1.0 - p.max()), float(1.0 - (p ** 2).sum())
@@ -128,7 +133,7 @@ def main():
 
     ds = Causal3DIdentPacked(os.path.join(
         REPO, "experiments/hdae/data/causal3dident/causal3dident_testset_128.h5"))
-    both = {a: trivial_baseline(ds, a) for a in ALL7}
+    both = {a: trivial_baseline(ds, a) for a in ALL7}   # exact, over all 25,200 rows
     mad = {a: both[a][0] for a in ALL7}          # constant-predictor baseline: the one in use
     sampler_base = {a: both[a][1] for a in ALL7}  # blind-sampler baseline: recorded, not used
     print("FC baseline in use (best constant predictor):",
@@ -149,7 +154,7 @@ def main():
         js = json.load(open(os.path.join(args.outdir, f"sweep_{label}.json")))
         ps = np.load(os.path.join(args.outdir, f"persample_{label}.npz"))
         idx = [r["i"] for r in js["cohort"]]
-        A = np.stack([ds[i]["attr"].numpy() for i in idx])          # [n, 11] source
+        A = np.asarray(ds.attr[idx], dtype=np.float64)              # [n, 11] source
         specs = load_hdae_config(os.path.join(REPO, cfgp), require_data=False).hdae_conf.encoder.cond_specs
         y = to_cond_values(torch.from_numpy(A[:, :8]), specs).numpy()
 
