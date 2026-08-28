@@ -35,6 +35,45 @@ print(hashlib.md5(b"".join(m)).hexdigest() + f"-{len(m)}")
 
 ## Results, newest first
 
+### Policy: epoch 50 is the canonical checkpoint for every model
+
+k=1, k=5 and k=11 are all released at **epoch 50**, giving one matched-epoch protocol across the
+depth ladder. Everything past epoch 50 has been deleted; intermediates at or below 50 are kept.
+
+This is a deliberate choice made against the evidence below, which shows both measured models
+peak EARLIER than 50 on counterfactual quality. Matched-epoch comparability was preferred over
+per-model best-checkpoint selection. The per-epoch numbers are preserved so a best-checkpoint
+protocol can be reconstructed later without re-running anything.
+
+### `2c43fe6`+ — k=11 saturates at epoch 37; the extension bought nothing
+
+Six checkpoints, epochs 12-59, all at one fixed guidance setting
+(`class=8 pos_spl=1.5 pos_obj=2.5 rot_obj=3`), n=256, T=50:
+
+| epoch | CC | FC obs | FC unobs | CF1 obs | pos_spl | pos_obj | rot_obj |
+|---:|---:|---:|---:|---:|---:|---:|---:|
+| 12 | 0.9407 | 0.9640 | 0.9134 | 0.9522 | 0.0227 | 0.0359 | 0.1097 |
+| 25 | 0.9517 | 0.9678 | 0.9382 | 0.9597 | 0.0211 | 0.0304 | 0.0841 |
+| **37** | **0.9534** | 0.9672 | **0.9565** | **0.9603** | **0.0208** | **0.0301** | 0.0800 |
+| 50 | 0.9521 | 0.9670 | 0.9557 | 0.9595 | 0.0213 | 0.0310 | **0.0752** |
+| 53 | 0.9516 | 0.9681 | 0.9555 | 0.9597 | 0.0220 | 0.0311 | 0.0757 |
+| 59 | 0.9497 | 0.9672 | 0.9557 | 0.9583 | 0.0227 | 0.0312 | 0.0775 |
+
+`pos_spl` at epoch 59 is 0.0227 -- exactly its epoch-12 value. Meanwhile the stitched loss fit
+over epochs 0.2-65.8 gives `L(e) = 0.0026914 * e^-0.3017 + 0.000489`, claiming 61.4% of the loss
+is still reducible at a rate of 0.279%/epoch. **The loss-plateau criterion points the wrong way on
+both models** and should not be used for this question again.
+
+```bash
+bash <driver>   # cfg_sweep_c3di.py per checkpoint, --attr-g class=8 pos_spl=1.5 pos_obj=2.5 rot_obj=3
+python experiments/hdae/scripts/k11_epoch_curves.py
+```
+
+Outputs: `experiments/hdae/outputs/k11_epoch_curves.json`, `k11_convergence.png`,
+`cfg_sweep/sweep_k11ep{12,25,37,50,53,59}.json` + matching `persample_*.npz`, and the extension's
+TensorBoard history under `outputs/c3di_k11_ext75/logs/`. The epoch-53 and 59 WEIGHTS were deleted
+under the epoch-50 policy; the measurements they produced are all retained.
+
 ### `c2454f7` — k=1 is over-trained at 50 epochs
 
 The finding that changed the plan: all four counterfactual metrics degrade monotonically
