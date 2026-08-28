@@ -119,3 +119,54 @@ checkpoints already on disk:
     k=11  epochs 12, 25, 37, 50   (steps 48234, 96468, 144702, 192936)
 
 Evaluating those eight gives the metric-versus-epoch curve to 50 epochs with no further training.
+
+---
+
+## Finding, 2026-08-28: k=1 is OVER-trained at 50 epochs, not under-trained
+
+The convergence question was posed as "how many more epochs do these need". For k=1 the answer
+is negative: it needed fewer. Evaluating the four k=1 checkpoints on a fixed 256-image cohort at
+T=50, each intervention at k=1's own best guidance strength:
+
+| epoch | class  | pos_spl | pos_obj | rot_obj | recon (pos_obj) |
+|------:|-------:|--------:|--------:|--------:|----------------:|
+|     8 | 97.66% |  0.0291 |  0.1422 |  0.1505 |          0.0128 |
+|    22 | 96.09% |  0.0345 |  0.1662 |  0.1485 |          0.0126 |
+|    36 | 92.19% |  0.0364 |  0.1828 |  0.1611 |          0.0127 |
+|    50 | 87.11% |  0.0390 |  0.1976 |  0.1767 |          0.0125 |
+
+All four metrics degrade monotonically. `class` loses 10.5 points, `pos_obj` 39%. Sixteen of
+sixteen readings move the wrong way, which is far outside n=256 sampling noise.
+
+RECONSTRUCTION IS FLAT over the same span (0.0128 -> 0.0125). Nothing is broken in the
+autoencoder; what decays is specifically the response to an intervention. And the TRAINING LOSS
+FALLS THROUGHOUT. Loss and counterfactual quality are anti-correlated for this model, so a
+loss-plateau stopping criterion cannot see this failure at all.
+
+k=11 over the same span does the opposite -- improves, then plateaus by epoch 25-37:
+
+| epoch  | class   | pos_spl | pos_obj | rot_obj |
+|-------:|--------:|--------:|--------:|--------:|
+|     12 | 100.00% |  0.0211 |  0.0389 |  0.1098 |
+|     25 | 100.00% |  0.0202 |  0.0310 |  0.0841 |
+|     37 |  99.61% |  0.0202 |  0.0303 |  0.0799 |
+|     50 | 100.00% |  0.0214 |  0.0306 |  0.0752 |
+
+WORKING HYPOTHESIS: conditioning collapse. With a single 512-d tap at `mid`, the semantic latent
+absorbs progressively more of the image until the attribute vector is redundant and the
+classifier-free-guidance delta shrinks toward nothing. k=11's eleven taps spread that capacity, so
+it does not collapse. This is directly testable with the `dL_all` diagnostic used in the original
+conditioning ablation -- loss with attributes nulled minus loss with true attributes -- computed
+across the four k=1 checkpoints. Not yet run.
+
+CONSEQUENCES FOR EVERYTHING ALREADY PUBLISHED:
+
+* Every k=1 number in this tag comes from k=1's WORST checkpoint. At each model's best epoch the
+  k=11 advantage on pos_obj is 0.0306 vs 0.1422 = 4.6x, not the 6.4x reported from epoch 50.
+* The matched-epoch protocol was still the fair comparison to run; it just happens to flatter k=11.
+* The k=1 extension to 75 epochs was started on the projection above and STOPPED at epoch 51 once
+  these curves came in. No k=1 extension checkpoint was ever written; its output directory holds
+  only the seeded copy of epoch 50.
+
+k=11's extension to 75 epochs continues, since its curve is flat-to-improving rather than
+degrading and the question "does it keep improving past 50" is still open for it.
