@@ -129,6 +129,10 @@ def main():
     ap.add_argument("--configs", nargs="+",
                     default=["experiments/hdae/configs/c3di_hier_k1_final.yaml",
                              "experiments/hdae/configs/c3di_hier_k11_final.yaml"])
+    ap.add_argument("--best-g", default=None,
+                    help="path to best_g.json; when given, each intervention is scored at that "
+                         "model's own best strength instead of every strength in the sweep")
+    ap.add_argument("--out", default=None)
     args = ap.parse_args()
 
     ds = Causal3DIdentPacked(os.path.join(
@@ -224,7 +228,7 @@ def main():
             print(f"{g:>5s} {v['CC']:7.4f} {v['FC_obs']:7.4f} {v['FC_unobs']:7.4f} "
                   f"{v['CF1_obs']:8.4f} {v['CF1_unobs']:8.4f}")
 
-    p = os.path.join(args.outdir, "aggregate_metrics.json")
+    p = args.out or os.path.join(args.outdir, "aggregate_metrics.json")
     json.dump(out, open(p, "w"), indent=2)
     print(f"\nwrote {p}")
 

@@ -263,3 +263,19 @@ Two A100-SXM4-40GB nodes; see `cluster.yaml` for hosts and the bootstrap recipe.
 torch 2.2.2+cu121, torchvision 0.17.2, pytorch-lightning 1.9.5, Python 3.11 via `uv`.
 Dataset: Causal3DIdent, Zenodo 10.5281/zenodo.4784282, packed to 128x128 HDF5 by
 `scripts/build_causal3dident.py` (252,000 train / 25,200 test).
+
+---
+
+## Complete results bundle — Causal3DIdent depth ladder
+
+`s3://najibi-research-7f2a/wip-from-826a88e/results/c3di-ladder-20260904/`
+
+Self-contained: `RESULTS.md` carries the full metric definitions (CC, FC_observed,
+FC_unobserved, CF1, AUC), the protocol, the headline tables and the caveats. `metrics_all.csv`
+is the flat table — 84 rows, one per (model, intervention, guidance strength), with CC, FC in
+all three pools, all three CF1 variants, and the raw predictor reading plus role for each of the
+seven attributes. `raw/persample_k*_n1024.npz` holds the per-sample errors, so any change to a
+metric definition is arithmetic on those files with nothing re-rendered.
+
+Headline: depth saturates at five taps. Mean CF1 at each model's own best g is 0.8399 (k=1),
+0.9507 (k=5), 0.9545 (k=11) — one tap to five is worth +0.1108, five to eleven +0.0038.
