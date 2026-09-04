@@ -60,6 +60,8 @@ def main():
             t['num_workers'],
             val_frac=d.get('val_frac', 0.02),
             preload_images=d.get('preload_images', True),
+            seed=cfg.raw.get('seed', 0),
+            train_frac=d.get('train_frac', 1.0),
         )
     else:
         dm = CelebAHQDataModule(

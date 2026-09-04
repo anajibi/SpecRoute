@@ -1,0 +1,116 @@
+# MorphoMNIST, k11, arm C conditioning. NEW BASELINE -- not comparable to morpho_hier_*_v3.
+#
+# WHY THIS EXISTS. MorphoMNIST is where the conditioning problem was first reported: two
+# continuous attributes (thickness, intensity) and two categorical (digit, hue). A bare
+# Linear(1,d) maps a continuous attribute's whole range onto a nearly affine curve, so
+# neighbouring values get near-identical embeddings and the attribute-CFG delta is tiny. The fix
+# -- Fourier features on continuous attributes plus per-attribute RMSNorm -- was developed and
+# validated on Causal3DIdent and reaches MorphoMNIST here for the first time.
+#
+# Three-arm ablation that chose it (all k=1, matched data/seed/batch/lr):
+#
+#   arm             recon PSNR   LPIPS     dL_all     cfg_delta
+#   A fourier only     32.57     0.0226    0.00078      0.0155
+#   B rmsnorm only     30.38     0.0204    0.00173      0.0265
+#   C both  <- this    37.74     0.0106    0.00363      0.0371
+#
+# dL_all is what the conditioning is worth to the denoiser: loss with attributes nulled minus
+# loss with true attributes. C wins on every axis. Caveat kept visible: C also saw 2x the images
+# of A, so its reconstruction lead is partly volume. What volume does NOT explain is A vs B --
+# matched budgets, and B beat A on conditioning by 2.2x from a 16% step DEFICIT.
+#
+# SEMANTIC LATENT IS 256, not the 512 used on Causal3DIdent. Split largest-first across the
+# taps by the same rule (c3di k=11 was 6x47 + 5x46 = 512):
+#   k=1   [256]
+#   k=11  3x24 + 8x23 = 256
+# Each k=11 tap therefore carries 23-24 dims against c3di's 46-47. Worth watching: the k=11
+# advantage on Causal3DIdent came from how the budget was SPLIT across resolutions, and this
+# halves the per-tap capacity.
+#
+# CHECKPOINT CADENCE IS DELIBERATE. 140 epochs is a lot for this dataset. On Causal3DIdent, k=1
+# peaked at epoch 8 of 50 and k=11 at epoch 37 of 50, and BOTH degraded afterwards while training
+# loss fell the whole way and pointed the wrong direction on both models. So: 15 checkpoints,
+# keep them all, and select on counterfactual quality after the run rather than taking the last.
+#
+# CHANGES FROM morpho_hier_k11_v3.yaml:
+#   encoder.fourier_freqs / fourier_max_freq / attr_norm   the arm C fix, previously absent
+#   lightning.devices 2 -> 1, strategy cuda -> auto        these nodes have ONE A100 each
+#   the whole train block                                  rewritten so k=1 and k=11 match exactly
+#
+base_template: celeba64d2c_autoenc
+data:
+  type: morphomnist
+  h5_path: "experiments/hdae/data/morphomnist/morphomnist_70k.h5"
+  image_size: 64
+  val_frac: 0.02
+  preload_images: true
+encoder:
+  type: hierarchical
+  hier_tap_block_ids: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, mid]
+  hier_level_dims: [24, 24, 24, 23, 23, 23, 23, 23, 23, 23, 23]
+  hier_block_to_level: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 10]
+  n_decoder_output_blocks: 12
+  n_attributes: 4
+  conditioning_attrs: [digit, thickness, intensity, hue]
+  causal_graph_path: "experiments/hdae/configs/causal_graph_morpho.yaml"
+  attr_embed_dim: 128
+  # 0.08 (was 0.0): forces independent per-attribute reliance during training (a training batch
+  # can now have e.g. hue present while digit/thickness are nulled) -- separate from
+  # cfg_drop_prob below, which only ever nulls all 4 attributes together and is what CFG needs;
+  # this is the knob that's actually new here. Distinct from cfg_drop_prob, does not affect it.
+  attr_dropout_prob: 0.08
+  fourier_freqs: 16          # 16 log-spaced sin/cos frequencies + raw value passthrough
+  fourier_max_freq: 1000.0
+  attr_norm: true            # per-attribute RMSNorm with learnable gain
+  hier_proj: linear
+conditioning:
+  strategy: per_block_attr
+  style_ch: 512            # INERT in this configuration. It is only read by
+                           # ConcatProjectionMerger (strategy: concat_proj), which is never
+                           # constructed -- build_merger has no callers. The hierarchical
+                           # encoder builds its own Linear(2*in_ch, level_dim) head per tap
+                           # from hier_level_dims, and PerBlockStyleFiLM projects each level
+                           # up to net_beatgans_embed_channels (512). Changing the semantic
+                           # latent does NOT require changing this, and changing this alone
+                           # would do nothing.
+  latent_drop_prob: 0.0
+  cfg_drop_prob: 0.1
+  cfg_guidance_scale: 3.0
+  # concat_film (was "sum", the default every other config still uses): ConcatAttributeEmbedding
+  # gives each attribute a protected 32-dim slice (128 total / 4 attrs) instead of summing into a
+  # shared 128-dim space; PerBlockStyleFiLM lets that concatenated embedding modulate a
+  # zs-derived style vector (scale+shift) instead of being diluted by concatenation with zs
+  # (which outnumbers it 47:32 here, worse for k=1's 512:128). See attr_conditioner.py.
+  attr_fusion: concat_film
+train:
+  # EVERY training hyperparameter below is IDENTICAL across k=1 and k=11 by construction.
+  # The prior configs were not: morpho_hier_k1_v3 ran batch 64 / lr 2e-4 / 30,000 steps while
+  # morpho_hier_k11_v3 ran batch 128 / lr 4e-4 / 75,000 steps. Comparing those two would confound
+  # depth with three other variables simultaneously. The Causal3DIdent k=1 vs k=11 result was
+  # damaged by exactly one such slip (an unmatched learning rate), and that caveat has had to
+  # travel with every figure since. Not repeating it.
+  batch_size_per_gpu: 128
+  total_batch_size: 128
+  lr: 4.0e-4
+  ema_decay: 0.9999
+  T: 1000
+  T_eval: 100
+  max_steps: 78125                 # 10,000,000 samples at batch 128
+  checkpoint_every_n_steps: 5000   # 15 checkpoints, ~9 epochs apart
+  save_top_k: -1
+  log_images_every_n_epochs: 5
+  log_images_n: 8
+  precision: 16-mixed
+  grad_clip: 1.0
+  num_workers: 4
+  compile: true
+lightning:
+  accelerator: gpu
+  devices: 1
+  strategy: auto
+  log_every_n_steps: 50
+  # 500 -> 250: batch=128 halves batches/epoch to ~459 (was ~918 at batch=64), and PL requires
+  # val_check_interval <= batches-per-epoch.
+  val_check_interval: 250
+seed: 42
+output_dir: experiments/hdae/outputs/morpho_k11_armc

@@ -52,8 +52,23 @@ DEFAULT_FACTOR_CONFIG_PATH = "experiments/hdae/configs/morphomnist_factors.yaml"
 
 # Attribute order is fixed and shared by the dataset, the causal graph config, and the SCM.
 MODELED_ATTRS = ["digit", "thickness", "intensity", "hue"]
-UNOBSERVED_ATTRS = ["slant", "rotation", "scale", "translate_x", "translate_y",
-                    "bg_freq", "bg_phase", "bg_amplitude", "texture_seed", "texture_amplitude"]
+# slant and texture_seed were DROPPED (2026-08-28). Both are still rendered -- slant at a
+# constant 0, texture at a constant seed -- they are simply no longer stored or treated as
+# attributes, because neither carries usable information:
+#   slant        was already constant 0.0 in every one of the 70,000 images. A constant column
+#                is dead weight in every predictor, every FC pool, and every variance analysis.
+#   texture_seed is a per-image random INTEGER SEED, not a physical quantity. Its effect on
+#                pixels is pseudo-random by construction, so no model can predict it and no
+#                amount of extra data makes it learnable -- it is pure irreducible noise that
+#                only widens the error bars on everything else. Fixing the seed makes the
+#                texture pattern deterministic, so texture_amplitude stays a real, learnable
+#                nuisance factor while the unpredictable part goes away.
+UNOBSERVED_ATTRS = ["rotation", "scale", "translate_x", "translate_y",
+                    "bg_freq", "bg_phase", "bg_amplitude", "texture_amplitude"]
+
+# The fixed texture pattern seed. Any constant works; it is recorded here so the rendering is
+# reproducible and so nobody mistakes the constant for a leftover per-image value.
+FIXED_TEXTURE_SEED = 20260828
 ATTRIBUTE_NAMES = MODELED_ATTRS + UNOBSERVED_ATTRS
 
 
@@ -234,7 +249,6 @@ class Factors:
     thickness: float
     intensity: float
     hue: float
-    slant: float
     rotation: float
     scale: float
     translate_x: float
@@ -242,8 +256,11 @@ class Factors:
     bg_freq: float
     bg_phase: float
     bg_amplitude: float
-    texture_seed: int
     texture_amplitude: float
+    # Rendered but NOT stored -- see UNOBSERVED_ATTRS. Defaults make from_vector() work on the
+    # 12-column records without either of them being present.
+    slant: float = 0.0
+    texture_seed: int = FIXED_TEXTURE_SEED
     # Not part of ATTRIBUTE_NAMES / the logged record -- generation-time-only so render() can
     # compute intensity's target from thickness's *achieved* value (see render()'s docstring for
     # why: the requested thickness target and what morphology actually achieves can diverge, and
@@ -258,7 +275,8 @@ class Factors:
     def from_vector(cls, vec: np.ndarray) -> "Factors":
         kwargs = dict(zip(ATTRIBUTE_NAMES, vec.tolist()))
         kwargs["digit"] = int(round(kwargs["digit"]))
-        kwargs["texture_seed"] = int(round(kwargs["texture_seed"]))
+        if "texture_seed" in kwargs:
+            kwargs["texture_seed"] = int(round(kwargs["texture_seed"]))
         return cls(**kwargs)
 
 
@@ -284,7 +302,9 @@ def sample_targets(index: int, digit: int, config: dict) -> Dict[str, float]:
     bg_freq = sample_from_spec(rng, f["bg_freq"])
     bg_phase = sample_from_spec(rng, f["bg_phase"])
     bg_amplitude = sample_from_spec(rng, f["bg_amplitude"])
-    texture_seed = int(rng.randint(0, 2 ** 31 - 1))
+    rng.randint(0, 2 ** 31 - 1)          # draw kept so the RNG stream is unchanged from the
+                                         # previous build; only its USE is dropped
+    texture_seed = FIXED_TEXTURE_SEED    # deterministic texture pattern -- see UNOBSERVED_ATTRS
     texture_amplitude = sample_from_spec(rng, f["texture_amplitude"])
     return dict(digit=digit, thickness=thickness_target, intensity=0.0, hue=hue, slant=slant,
                rotation=rotation, scale=scale, translate_x=tx, translate_y=ty, bg_freq=bg_freq,

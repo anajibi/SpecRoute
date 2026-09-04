@@ -111,9 +111,13 @@ class AttrSpec:
         return (angle % (2 * torch.pi)) * (self.period / (2 * torch.pi))
 
 
-torch.serialization.add_safe_globals([AttrSpec])  # this dataclass rides along in checkpoint hparams (torch>=2.6
-                                                  # defaults torch.load to weights_only=True, which otherwise
-                                                  # rejects it as an un-allowlisted global)
+# This dataclass rides along in checkpoint hparams. torch>=2.6 defaults torch.load to
+# weights_only=True and rejects un-allowlisted globals, so it has to be registered there. The
+# call does not exist before 2.6 (this project runs 2.2.2+cu121, pinned by cluster.yaml because
+# pytorch-lightning 1.9.5 will not tolerate a newer one), and on those versions weights_only
+# already defaults to False, so there is nothing to allowlist.
+if hasattr(torch.serialization, "add_safe_globals"):
+    torch.serialization.add_safe_globals([AttrSpec])
 
 
 @dataclasses.dataclass

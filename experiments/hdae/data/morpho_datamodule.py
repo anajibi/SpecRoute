@@ -16,7 +16,8 @@ class MorphoMNISTDataModule(_Base):
     transform (e.g. a mirrored "2" is not a valid digit), so it's omitted rather than ported over.
     """
 
-    def __init__(self, h5_path, batch_size=32, num_workers=0, val_frac=0.02, preload_images=True, seed=0):
+    def __init__(self, h5_path, batch_size=32, num_workers=0, val_frac=0.02, preload_images=True,
+                 seed=0, train_frac=1.0):
         super().__init__()
         self.h5_path = h5_path
         self.batch_size = batch_size
@@ -24,6 +25,12 @@ class MorphoMNISTDataModule(_Base):
         self.val_frac = val_frac
         self.preload_images = preload_images
         self.seed = seed
+        # train_frac < 1 subsamples the TRAIN split only, for data-scaling experiments. The
+        # subsample is STRATIFIED BY DIGIT and seeded, so a 12.5% run keeps all ten classes in
+        # their original proportions rather than losing a class to an unlucky draw. Val and test
+        # are never subsampled -- every fraction is scored on exactly the same held-out data,
+        # which is the whole point of the comparison.
+        self.train_frac = float(train_frac)
 
     def setup(self, stage=None):
         ds = MorphoMNISTPacked(self.h5_path, preload_images=self.preload_images)
@@ -34,7 +41,16 @@ class MorphoMNISTDataModule(_Base):
         rng.shuffle(train_all)
         n_val = max(1, int(len(train_all) * self.val_frac))
         val_idx, train_idx = train_all[:n_val], train_all[n_val:]
+        if self.train_frac < 1.0:
+            digits = ds.attrs[train_idx, ds.attribute_names.index("digit")].astype(int)
+            keep = []
+            for d in np.unique(digits):
+                cls = train_idx[digits == d]
+                n_keep = max(1, int(round(len(cls) * self.train_frac)))
+                keep.append(np.random.RandomState(self.seed + 1000 + int(d)).permutation(cls)[:n_keep])
+            train_idx = np.sort(np.concatenate(keep))
         test_idx = np.nonzero(parts == 1)[0]
+        self.n_train = len(train_idx)
         self.train_set = Subset(ds, train_idx.tolist())
         self.val_set = Subset(ds, val_idx.tolist())
         self.test_set = Subset(ds, test_idx.tolist())
