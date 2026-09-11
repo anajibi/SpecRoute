@@ -47,6 +47,13 @@ while true; do
     # skip anything still being written
     s1=$(stat -c%s "$f"); sleep 3; s2=$(stat -c%s "$f")
     [ "$s1" = "$s2" ] || continue
+    # A truncated checkpoint uploads and ETag-verifies perfectly -- the ETag proves the upload
+    # was faithful, not that the file was complete. On 2026-09-10 a disk-full crash left a
+    # 289 MB fragment of a 1523 MB checkpoint, and this script marked it "verified in s3".
+    if [ "$s2" -lt 1000000000 ]; then
+      echo "[$(date -u +%FT%TZ)] REFUSING $b -- ${s2} bytes, too small to be a checkpoint"
+      continue
+    fi
     key="$PREFIX/$b"
     remote=$(aws s3api head-object --bucket "$BUCKET" --key "$key" --query ETag --output text 2>/dev/null | tr -d '"')
     if [ -z "$remote" ]; then

@@ -1,23 +1,19 @@
-# DATA-SCALING RUN: k=11, arm C, 25% of the training split.
+# SEED REPLICATE: ed384, seed 44
 #
-# QUESTION: is 70,000 images enough, or is the model data-limited?
+# Every ranking in the 13-config sweep assumed run-to-run variance is smaller than the
+# effects being compared. ed384's entanglement anomaly is direct evidence against that.
+# These replicates measure the variance itself: same config, same data, seed only.
 #
-# DESIGN. The optimisation budget is held FIXED at 30,000 steps for every fraction, so all four
-# runs get identical gradient updates and the 12.5% run simply sees each image 8x more often.
-# Any difference between them is therefore attributable to DATA DIVERSITY, not training length.
-# Fixing epochs instead would give the small fractions fewer updates and would measure the wrong
-# thing entirely.
+# One-factor-at-a-time from `base`. Change from baseline: attr_embed_dim=384
 #
-# 30,000 steps rather than the full 78,125: on Causal3DIdent both models peaked well before their
-# budget (k=1 at epoch 8 of 50, k=11 at 37 of 50) and degraded after, so a shorter budget is
-# likely CLOSER to the peak here, not further from it.
+# Brackets the optimum: 128->256 is +0.1124 CC, 256->512 gives back 0.0757. The curve turns
+# over somewhere in between, and 384 says whether 256 is already the peak or merely on the
+# near side of it.
 #
-# The train subsample is stratified by digit and seeded, so every fraction keeps all ten classes
-# in proportion. Val and test are NEVER subsampled -- all four runs are scored on identical
-# held-out data.
-#
-# Fractions: 12.5 / 25 / 50 / 100. Four points rather than three because three cannot distinguish
-# a flattening curve from a straight line, and the extra run is the cheapest of the set.
+# Selection metric is CC (does the edit land), per the decision to optimise edit success
+# directly. FC and CF1 are recorded alongside so collateral damage stays visible, but they
+# do not select. All runs are k=11 on 100% of the data; the winning conditioning config is
+# then applied to k=1/k=5/k=11 for the final comparison.
 #
 base_template: celeba64d2c_autoenc
 data:
@@ -25,7 +21,7 @@ data:
   h5_path: "experiments/hdae/data/morphomnist/morphomnist_70k_v2.h5"
   image_size: 64
   val_frac: 0.02
-  train_frac: 0.25
+  train_frac: 1.0
   preload_images: true
 encoder:
   type: hierarchical
@@ -36,7 +32,7 @@ encoder:
   n_attributes: 4
   conditioning_attrs: [digit, thickness, intensity, hue]
   causal_graph_path: "experiments/hdae/configs/causal_graph_morpho.yaml"
-  attr_embed_dim: 128
+  attr_embed_dim: 384
   # 0.08 (was 0.0): forces independent per-attribute reliance during training (a training batch
   # can now have e.g. hue present while digit/thickness are nulled) -- separate from
   # cfg_drop_prob below, which only ever nulls all 4 attributes together and is what CFG needs;
@@ -78,14 +74,16 @@ train:
   ema_decay: 0.9999
   T: 1000
   T_eval: 100
-  max_steps: 30000                 # fixed across all fractions
-  checkpoint_every_n_steps: 6000   # 5 saves; a janitor uploads each to s3 then prunes
+  max_steps: 30000
+  checkpoint_every_n_steps: 6000
                                   # to one local copy -- 4 concurrent runs at ~1.4 GB
                                   # per checkpoint will not fit on this disk otherwise
                                   # but keeping them all means best-checkpoint can be
                                   # computed later without re-running anything
-  save_top_k: -1
-  log_images_every_n_epochs: 5
+  save_top_k: 1                    # tuning selects on the FINAL model only, so keeping
+                                   # every 6k-step checkpoint just fills the disk -- that
+                                   # is what left the control node at 66 MB free.
+  log_images_every_n_epochs: 0
   log_images_n: 8
   precision: 16-mixed
   grad_clip: 1.0
@@ -103,5 +101,5 @@ lightning:
                                   # subsampled (12.5% leaves only 57 batches), which
                                   # Lightning rejects outright. Validation does not touch
                                   # the weights, so cadence cannot affect the comparison.
-seed: 42
-output_dir: experiments/hdae/outputs/morpho_scale_025
+seed: 44
+output_dir: experiments/hdae/outputs/tune_ed384_s44

@@ -38,6 +38,24 @@ class EncoderHierarchyConfig:
     # Per-attribute RMSNorm (learnable gain) on each attribute's embedding before fusion, so no
     # attribute dominates the fused vector by raw magnitude alone. False = off (original).
     attr_norm: bool = False
+    # ---- Adversarial tap invariance (gradient reversal) --------------------------------
+    # A linear probe showed every k=11 tap recovers `hue` at 97-100% accuracy (spread 0.0275)
+    # -- eleven redundant copies of the source attribute that an intervention never touches,
+    # so the edit has to fight them. k=1's single tap has 10x the width yet encodes hue LESS
+    # (0.7968) and the unmodelled attributes 1.8x BETTER. These knobs train the taps to stop
+    # duplicating what the attribute pathway already supplies.
+    #
+    # adv_tap_lambda = 0.0 leaves training completely unchanged (no heads built, no loss term).
+    adv_tap_lambda: float = 0.0
+    # Fraction of max_steps over which lambda ramps 0 -> adv_tap_lambda. The encoder should
+    # learn to reconstruct before it is penalised for carrying attributes; a full-strength
+    # adversary from step 0 collapses the latent. Standard DANN practice.
+    adv_tap_warmup_frac: float = 0.3
+    # Hidden width of each per-tap adversary MLP. The head is deliberately STRONGER than the
+    # linear probe used for diagnosis: beating a linear probe only proves the attribute was
+    # made linearly inaccessible, not that it is gone.
+    adv_tap_hidden: int = 128
+    adv_tap_layers: int = 3
 
     @property
     def level_dims(self):

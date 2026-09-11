@@ -279,3 +279,50 @@ metric definition is arithmetic on those files with nothing re-rendered.
 
 Headline: depth saturates at five taps. Mean CF1 at each model's own best g is 0.8399 (k=1),
 0.9507 (k=5), 0.9545 (k=11) — one tap to five is worth +0.1108, five to eleven +0.0038.
+
+---
+
+## MorphoMNIST conditioning hyperparameter tuning
+
+Branch `wip-from-826a88e`, commit `c580266`.
+Archive: `s3://najibi-research-7f2a/hdae-handoff/morpho_tuning/`
+
+One prefix per config, each holding `checkpoints/`, `config.yaml`, `sweep_tune_<name>.json`
+and `persample_tune_<name>.npz` — the weights, the exact config that produced them, and the
+per-sample errors they scored. `analysis/` holds `tune_metrics.json`, `tune_bootstrap.json`
+and the three scripts that produce them. All 30 objects (10.3 GB) uploaded and verified by
+recomputed multipart ETag, not by size.
+
+One-factor-at-a-time from `base`, all k=11 on 100% of the data, 30,000 steps, batch 128,
+lr 4e-4, seed 42. `base` is `morpho_scale_100`, verified programmatically to be identical to
+`tune_base` on every tuned knob. Evaluated on a shared 512-image cohort, T=50, seed 0,
+g in {1, 1.5, 2, 2.5, 3, 5, 8}. Every config peaks at g=5, so the table is matched-guidance.
+
+| config | knob | CC | CC 95% CI | CF1 | FC_unobs |
+|---|---|---|---|---|---|
+| ed256 | `attr_embed_dim: 256` | 0.8987 | [0.8889, 0.9084] | 0.7931 | 0.7289 |
+| base  | reference | 0.7864 | [0.7713, 0.8013] | 0.7697 | 0.7916 |
+| mf100 | `fourier_max_freq: 100` | 0.7774 | [0.7616, 0.7928] | 0.7704 | 0.7887 |
+| f32   | `fourier_freqs: 32` | 0.7736 | [0.7585, 0.7888] | 0.7582 | 0.7750 |
+| f8    | `fourier_freqs: 8` | 0.7718 | [0.7526, 0.7906] | 0.7517 | 0.7901 |
+| f0    | `fourier_freqs: 0` | 0.6647 | [0.6414, 0.6870] | 0.6830 | 0.7855 |
+
+Intervals are a paired bootstrap (B=10,000) over the shared cohort, `tune_bootstrap.py`.
+The same index draws score every config, so cohort-composition noise cancels in the
+difference; best-g is fixed at the point estimate rather than re-arg-maxed per replicate.
+
+Only two effects are real. `ed256` +0.1124 CC, CI [+0.0980, +0.1269]. `f0` -0.1217 CC,
+CI [-0.1444, -0.0989]. `f8`, `f32` and `mf100` all have CIs straddling zero — frequency
+count is saturated at 16 and `fourier_max_freq` does not matter.
+
+CAVEAT on `ed256`: it has the worst preservation of the six (FC_unobs 0.7289 against ~0.79
+for the rest), which is why its CF1 gain is +0.0234 against a CC gain of +0.1124. It is
+partly buying edit success by disturbing the eight unobserved attributes.
+
+CAVEAT on all six: descendant-CC still scales by the trivial-predictor error rather than by
+SCM-propagated descendant values. Affects only `do(thickness)`, the one intervention with a
+descendant, and biases all configs the same direction.
+
+Local checkpoints for `f0`, `f8`, `f32`, `mf100` were pruned after ETag verification;
+`ed256` and `base` are still on disk. Restore any of them with
+`aws s3 cp s3://najibi-research-7f2a/hdae-handoff/morpho_tuning/<name>/checkpoints/last.ckpt .`

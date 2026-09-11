@@ -1,31 +1,31 @@
-# DATA-SCALING RUN: k=11, arm C, 50% of the training split.
+# FINAL MODEL -- ed384 configuration, sample-matched to Causal3DIdent.
 #
-# QUESTION: is 70,000 images enough, or is the model data-limited?
+# Every knob below is the winner of the 13-config sweep, or the baseline value where the
+# sweep found no detectable effect:
+#   attr_embed_dim   384   the only knob with a real effect
+#   attr_norm        true  (nonorm won alone but LOST when combined with a wider embed, and
+#                           was worse on hue entanglement -- not carried forward)
+#   fourier_freqs    16    (8 and 32 both indistinguishable from 16; 0 is much worse)
+#   fourier_max_freq 1000  (100 indistinguishable)
+#   attr_dropout     0.08  (0.15 measurably worse)
+#   cfg_drop_prob    0.1   (0.2 measurably worse)
+#   attr_fusion      concat_film  (sum is the worst config tested)
 #
-# DESIGN. The optimisation budget is held FIXED at 30,000 steps for every fraction, so all four
-# runs get identical gradient updates and the 12.5% run simply sees each image 8x more often.
-# Any difference between them is therefore attributable to DATA DIVERSITY, not training length.
-# Fixing epochs instead would give the small fractions fewer updates and would measure the wrong
-# thing entirely.
+# max_steps 96,469: Causal3DIdent's final models ran 192,937 steps at batch 64 = 12,348,000
+# samples. This is the same sample budget at batch 128. Matching raw STEP count instead would
+# be 24.7M samples -- twice what c3di ever saw, on a dataset a quarter the size.
 #
-# 30,000 steps rather than the full 78,125: on Causal3DIdent both models peaked well before their
-# budget (k=1 at epoch 8 of 50, k=11 at 37 of 50) and degraded after, so a shorter budget is
-# likely CLOSER to the peak here, not further from it.
-#
-# The train subsample is stratified by digit and seeded, so every fraction keeps all ten classes
-# in proportion. Val and test are NEVER subsampled -- all four runs are scored on identical
-# held-out data.
-#
-# Fractions: 12.5 / 25 / 50 / 100. Four points rather than three because three cannot distinguish
-# a flattening curve from a straight line, and the extra run is the cheapest of the set.
-#
+# checkpoint_every_n_steps 12,000 with save_top_k -1: k=1 on Causal3DIdent peaked at epoch 8
+# and then lost 10.5 points of class accuracy by epoch 50 while its training loss kept falling.
+# A single end-of-run checkpoint cannot detect that. The janitor ships each one to s3 and
+# prunes locally, so keeping them all costs no disk.
 base_template: celeba64d2c_autoenc
 data:
   type: morphomnist
   h5_path: "experiments/hdae/data/morphomnist/morphomnist_70k_v2.h5"
   image_size: 64
   val_frac: 0.02
-  train_frac: 0.5
+  train_frac: 1.0
   preload_images: true
 encoder:
   type: hierarchical
@@ -36,7 +36,7 @@ encoder:
   n_attributes: 4
   conditioning_attrs: [digit, thickness, intensity, hue]
   causal_graph_path: "experiments/hdae/configs/causal_graph_morpho.yaml"
-  attr_embed_dim: 128
+  attr_embed_dim: 384
   # 0.08 (was 0.0): forces independent per-attribute reliance during training (a training batch
   # can now have e.g. hue present while digit/thickness are nulled) -- separate from
   # cfg_drop_prob below, which only ever nulls all 4 attributes together and is what CFG needs;
@@ -78,14 +78,16 @@ train:
   ema_decay: 0.9999
   T: 1000
   T_eval: 100
-  max_steps: 30000                 # fixed across all fractions
-  checkpoint_every_n_steps: 6000   # 5 saves; a janitor uploads each to s3 then prunes
+  max_steps: 96469
+  checkpoint_every_n_steps: 12000
                                   # to one local copy -- 4 concurrent runs at ~1.4 GB
                                   # per checkpoint will not fit on this disk otherwise
                                   # but keeping them all means best-checkpoint can be
                                   # computed later without re-running anything
   save_top_k: -1
-  log_images_every_n_epochs: 5
+                                   # every 6k-step checkpoint just fills the disk -- that
+                                   # is what left the control node at 66 MB free.
+  log_images_every_n_epochs: 0
   log_images_n: 8
   precision: 16-mixed
   grad_clip: 1.0
@@ -104,4 +106,4 @@ lightning:
                                   # Lightning rejects outright. Validation does not touch
                                   # the weights, so cadence cannot affect the comparison.
 seed: 42
-output_dir: experiments/hdae/outputs/morpho_scale_050
+output_dir: experiments/hdae/outputs/final_ed384

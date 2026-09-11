@@ -34,7 +34,7 @@ defaults:
 
 nodes:
   - name: gpu1
-    host: 149.165.153.184
+    host: 149.165.172.91   # was 149.165.153.184 until 2026-09-04; the node was rebuilt
     # user / port / ssh_key / workdir / venv inherit from `defaults` unless set here.
     enabled: true
     role: training

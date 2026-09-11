@@ -1,0 +1,104 @@
+# DEPTH LADDER: k=5, seed 42
+#
+# Final comparison. Conditioning hyperparameters are the sweep winners and are IDENTICAL across
+# all three depths, so k is the only variable: attr_embed_dim 384, attr_norm true,
+# fourier_freqs 16, fourier_max_freq 1000, attr_dropout 0.08, cfg_drop_prob 0.1,
+# attr_fusion concat_film, batch 128, lr 4e-4.
+#
+# max_steps 36,000: measured, not assumed. The 96,469-step run's checkpoint ladder peaked at
+# step 36,000 (CC 0.8678, CF1 0.8070) and then decayed monotonically for 60,000 more steps,
+# with the optimal guidance drifting 5 -> 8 as the model needed more push to move at all.
+#
+# k=5 taps are a nested subset of the k=11 ladder, so depth is the only thing that changes.
+# Semantic latent is 256 dims at every depth -- otherwise this would confound depth with capacity.
+#
+# Checkpoints every 12,000 steps: k=1 on Causal3DIdent peaked at epoch 8 and over-trained from
+# there. 36,000 is the k=11 peak and may not be k=1's, so the ladder stays inspectable.
+base_template: celeba64d2c_autoenc
+data:
+  type: morphomnist
+  h5_path: "experiments/hdae/data/morphomnist/morphomnist_70k_v2.h5"
+  image_size: 64
+  val_frac: 0.02
+  train_frac: 1.0
+  preload_images: true
+encoder:
+  type: hierarchical
+  hier_tap_block_ids: [0, 3, 6, 8, mid]
+  hier_level_dims: [52, 51, 51, 51, 51]
+  hier_block_to_level: [0, 0, 0, 1, 1, 1, 2, 2, 3, 3, 4, 4]
+  n_decoder_output_blocks: 12
+  n_attributes: 4
+  conditioning_attrs: [digit, thickness, intensity, hue]
+  causal_graph_path: "experiments/hdae/configs/causal_graph_morpho.yaml"
+  attr_embed_dim: 384
+  # 0.08 (was 0.0): forces independent per-attribute reliance during training (a training batch
+  # can now have e.g. hue present while digit/thickness are nulled) -- separate from
+  # cfg_drop_prob below, which only ever nulls all 4 attributes together and is what CFG needs;
+  # this is the knob that's actually new here. Distinct from cfg_drop_prob, does not affect it.
+  attr_dropout_prob: 0.08
+  fourier_freqs: 16          # 16 log-spaced sin/cos frequencies + raw value passthrough
+  fourier_max_freq: 1000.0
+  attr_norm: true            # per-attribute RMSNorm with learnable gain
+  hier_proj: linear
+conditioning:
+  strategy: per_block_attr
+  style_ch: 512            # INERT in this configuration. It is only read by
+                           # ConcatProjectionMerger (strategy: concat_proj), which is never
+                           # constructed -- build_merger has no callers. The hierarchical
+                           # encoder builds its own Linear(2*in_ch, level_dim) head per tap
+                           # from hier_level_dims, and PerBlockStyleFiLM projects each level
+                           # up to net_beatgans_embed_channels (512). Changing the semantic
+                           # latent does NOT require changing this, and changing this alone
+                           # would do nothing.
+  latent_drop_prob: 0.0
+  cfg_drop_prob: 0.1
+  cfg_guidance_scale: 3.0
+  # concat_film (was "sum", the default every other config still uses): ConcatAttributeEmbedding
+  # gives each attribute a protected 32-dim slice (128 total / 4 attrs) instead of summing into a
+  # shared 128-dim space; PerBlockStyleFiLM lets that concatenated embedding modulate a
+  # zs-derived style vector (scale+shift) instead of being diluted by concatenation with zs
+  # (which outnumbers it 47:32 here, worse for k=1's 512:128). See attr_conditioner.py.
+  attr_fusion: concat_film
+train:
+  # EVERY training hyperparameter below is IDENTICAL across k=1 and k=11 by construction.
+  # The prior configs were not: morpho_hier_k1_v3 ran batch 64 / lr 2e-4 / 30,000 steps while
+  # morpho_hier_k11_v3 ran batch 128 / lr 4e-4 / 75,000 steps. Comparing those two would confound
+  # depth with three other variables simultaneously. The Causal3DIdent k=1 vs k=11 result was
+  # damaged by exactly one such slip (an unmatched learning rate), and that caveat has had to
+  # travel with every figure since. Not repeating it.
+  batch_size_per_gpu: 128
+  total_batch_size: 128
+  lr: 4.0e-4
+  ema_decay: 0.9999
+  T: 1000
+  T_eval: 100
+  max_steps: 36000
+  checkpoint_every_n_steps: 12000
+                                  # to one local copy -- 4 concurrent runs at ~1.4 GB
+                                  # per checkpoint will not fit on this disk otherwise
+                                  # but keeping them all means best-checkpoint can be
+                                  # computed later without re-running anything
+  save_top_k: -1
+                                   # every 6k-step checkpoint just fills the disk -- that
+                                   # is what left the control node at 66 MB free.
+  log_images_every_n_epochs: 0
+  log_images_n: 8
+  precision: 16-mixed
+  grad_clip: 1.0
+  num_workers: 4
+  compile: true
+lightning:
+  accelerator: gpu
+  devices: 1
+  strategy: auto
+  log_every_n_steps: 50
+  # 500 -> 250: batch=128 halves batches/epoch to ~459 (was ~918 at batch=64), and PL requires
+  # val_check_interval <= batches-per-epoch.
+  val_check_interval: 1.0          # once per EPOCH, not a fixed step count. A fixed 250
+                                  # exceeds the batches-per-epoch once the train split is
+                                  # subsampled (12.5% leaves only 57 batches), which
+                                  # Lightning rejects outright. Validation does not touch
+                                  # the weights, so cadence cannot affect the comparison.
+seed: 42
+output_dir: experiments/hdae/outputs/ladder_k5_s42

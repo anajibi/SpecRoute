@@ -64,6 +64,19 @@ class ImageLogCallback(_Base):
     # -- lazy setup ------------------------------------------------
 
     def _load_cohort(self, pl_module):
+        # This logger is Causal3DIdent-specific: it reads the `latents` dataset and assumes
+        # that attribute column layout. Pointed at any other packed dataset -- MorphoMNIST stores
+        # `attrs`, not `latents` -- it raises KeyError every time it fires. That killed a
+        # MorphoMNIST data-scaling run at step 12,000 of 30,000 (2026-09-04): the 12.5% fraction
+        # has 4x shorter epochs, so it tripped the logger 4x more often than the 50% run beside it.
+        import h5py
+        with h5py.File(self.h5_path, "r") as _h:
+            if "latents" not in _h:
+                if not getattr(self, "_warned_skip", False):
+                    print(f"[image_logger] '{self.h5_path}' has no 'latents' dataset -- this logger "
+                          f"only supports Causal3DIdent. Skipping image logging.", flush=True)
+                    self._warned_skip = True
+                return
         from experiments.hdae.data.causal3dident import Causal3DIdentPacked
         import numpy as np
         ds = Causal3DIdentPacked(self.h5_path)

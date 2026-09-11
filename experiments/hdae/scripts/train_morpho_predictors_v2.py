@@ -74,9 +74,11 @@ ATTRS = {
 
 
 class H5Attrs(Dataset):
-    def __init__(self, path, idx, col, kind, lo=None, hi=None, n_classes=None, preload=True):
+    def __init__(self, path, idx, col, kind, lo=None, hi=None, n_classes=None, preload=True,
+                 attr_name=None):
         self.path, self.idx, self.col, self.kind = path, idx, col, kind
         self.lo, self.hi, self.n_classes = lo, hi, n_classes
+        self.attr_name = attr_name
         self._h5 = None
         with h5py.File(path, "r") as f:
             self.attrs = f["attrs"][:].astype(np.float32)
@@ -102,10 +104,20 @@ class H5Attrs(Dataset):
         img = torch.from_numpy(raw.astype(np.float32) / 255.).permute(2, 0, 1)
         v = float(self.attrs[j, self.col])
         if self.kind == "categorical":
-            # hue is stored as its bin CENTRE (0.05, 0.15, ...), not a class index
-            t = torch.tensor([round((v - self.lo) / (self.hi - self.lo) * self.n_classes - 0.5)
-                              if self.n_classes and self.hi > 1.5 else v], dtype=torch.float32)
-            t = t.clamp(0, (self.n_classes or 1) - 1)
+            # Class index comes from the attribute's DECLARED storage, never from a heuristic on
+            # its value range. The previous version guessed with `hi > 1.5`, which is False for
+            # hue (hi = 0.95), so hue's target stayed as its raw bin centre 0.05..0.95 and .long()
+            # truncated EVERY class to 0. The model learned to always answer 0, and the eval
+            # applied the same truncation to the label, so it reported 100.00% accuracy on a
+            # degenerate task. digit survived only because its formula happened to be a near
+            # identity. Explicit per-attribute semantics instead:
+            #   digit  raw IS the class index (0..9)
+            #   hue    raw is the BIN CENTRE  -> idx = round(raw * n_classes - 0.5)
+            if self.attr_name == "digit":
+                idx = round(v)
+            else:
+                idx = round(v * self.n_classes - 0.5)
+            t = torch.tensor([float(idx)], dtype=torch.float32).clamp(0, self.n_classes - 1)
         else:
             t = torch.tensor([2 * (v - self.lo) / (self.hi - self.lo) - 1], dtype=torch.float32)
         return img, t
@@ -164,7 +176,8 @@ def train_one(attr, args):
     lo, hi = float(A[tr_idx, col].min()), float(A[tr_idx, col].max())
     n_cls = out_dim if kind == "categorical" else None
 
-    mk = lambda idx, sh: DataLoader(H5Attrs(args.packed, idx, col, kind, lo, hi, n_cls),
+    mk = lambda idx, sh: DataLoader(H5Attrs(args.packed, idx, col, kind, lo, hi, n_cls,
+                                           attr_name=attr),
                                     batch_size=args.batch_size, shuffle=sh,
                                     num_workers=args.workers, pin_memory=True, drop_last=sh,
                                     persistent_workers=args.workers > 0)
