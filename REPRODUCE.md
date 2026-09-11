@@ -326,3 +326,51 @@ descendant, and biases all configs the same direction.
 Local checkpoints for `f0`, `f8`, `f32`, `mf100` were pruned after ETag verification;
 `ed256` and `base` are still on disk. Restore any of them with
 `aws s3 cp s3://najibi-research-7f2a/hdae-handoff/morpho_tuning/<name>/checkpoints/last.ckpt .`
+
+---
+
+## Adversarial tap invariance — final MorphoMNIST result
+
+Branch `wip-from-826a88e`, commit `d5270d0`, tag `morpho-adv-20260911`.
+Artifact: https://claude.ai/code/artifact/68ebb277-992a-4f6c-8e88-189f3a59ddd8
+Archive: `s3://najibi-research-7f2a/hdae-handoff/morpho_adv/` (manifest inside)
+Control group: `s3://najibi-research-7f2a/hdae-handoff/morpho_ladder/` (tag `morpho-ladder-baseline-20260910`)
+
+A linear probe found `hue` decodable at 97–100% from EVERY tap of the k=5 and k=11 baselines
+(spread 0.0067 and 0.0275) — redundant copies of the source attribute that an intervention never
+touches, so the edit has to fight them. An adversary trains the taps to stop carrying the four
+conditioned attributes: a 3-layer MLP probe per (tap × attribute) on DETACHED taps at 5× the
+model lr, while the encoder minimises distance to an uninformative prediction (uniform for
+categorical, standardised mean for continuous), λ ramping 0→1 over the first 30% of training.
+
+4,000-image cohort (seed 1); guidance selected per intervention on a DISJOINT 512 cohort (seed 0).
+
+| model | CC | CF1 | FC_unobs |
+|---|---|---|---|
+| k=1 baseline | 0.9214 | **0.8532** | **0.8334** |
+| k=1 adversarial | 0.9334 | 0.8176 | 0.6907 |
+| k=5 baseline | 0.9092 | 0.7674 | 0.6848 |
+| k=5 adversarial | 0.9232 | 0.8043 | 0.6892 |
+| k=11 baseline | 0.8385 | 0.7822 | 0.7559 |
+| **k=11 adversarial** | **0.9405** | 0.8416 | 0.7419 |
+
+k=11 gains +0.1019 CC, concentrated in the GLOBAL attributes (+0.0887), `hue` +0.1740 — the
+attribute that was decodable from all eleven taps. k=1 (+0.0120) and k=5 (+0.0141) are inside the
+measured 0.0348 seed spread and should be treated as null.
+
+Hue decodability per tap after training, shallow → deep:
+`k=5  0.991 0.982 0.916 0.369 0.222` and `k=11 0.98 … 0.74 0.29`. Both architectures independently
+strip the DEEP taps and leave the shallow ones, where colour cannot be removed without wrecking
+reconstruction. That is also why k=1 gains nothing — its single tap *is* the deep tap.
+
+CAVEATS: one seed per arm. All four attributes were stripped including `digit`, which is why
+FC_unobs falls (k=1's unmodelled decodability dropped 0.3698 → 0.2254); stripping only `hue` and
+`intensity` is the obvious next run. `thickness` gains ~+0.11 at every depth and is unexplained —
+it is also the only intervention with an SCM descendant, and descendant-CC still scales by the
+trivial-predictor error. Reconstruction floors barely moved, so removing `digit` did not break the
+decoder.
+
+NOTE ON ADVERSARIAL TRAINING METRICS: an untrained probe and a perfectly fooled probe are
+indistinguishable — both sit at chance and both give `head_loss` = 1.6513 here. Three separate bugs
+each produced a silently inert adversary that looked like success. Only the offline probe, fit fresh
+on frozen encoder outputs, can tell them apart.
