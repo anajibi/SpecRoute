@@ -1,0 +1,303 @@
+{
+  "model": "HDAE k=11, celebahq256_k11_cd015r, step 46875",
+  "protocol": {
+    "cohort": "cohort_2048.json",
+    "T": 50,
+    "sampler": "DDIM",
+    "inversion": "conditional x_T, cached and shared across all cells",
+    "null_set": "target-only (the attribute being intervened on)",
+    "thresholds": "FC readers untuned (logit>0); target attribute F1-optimal",
+    "fc_unobs_readers": 28,
+    "reader_selection": "F1 >= 0.55 on the partition-0 selection slice; see reader_keep.json"
+  },
+  "best_g_per_attribute": {
+    "Male": {
+      "g": 5.0,
+      "CC": 0.91943359375,
+      "FC_obs": 0.7685546875,
+      "FC_unobs": 0.7432454427083334,
+      "CF1": 0.8220045041083403
+    },
+    "Young": {
+      "g": 5.0,
+      "CC": 0.837890625,
+      "FC_obs": 0.840576171875,
+      "FC_unobs": 0.7508409288194444,
+      "CF1": 0.7919809657102121
+    },
+    "Beard": {
+      "g": 2.0,
+      "CC": 0.94580078125,
+      "FC_obs": 0.920654296875,
+      "FC_unobs": 0.8206922743055556,
+      "CF1": 0.8788162418899723
+    },
+    "Bald": {
+      "g": 6.0,
+      "CC": 0.8662109375,
+      "FC_obs": 0.60791015625,
+      "FC_unobs": 0.7146538628472222,
+      "CF1": 0.783167532592189
+    }
+  },
+  "full_g_sweep": {
+    "Male|g2": {
+      "attr": "Male",
+      "g": 2.0,
+      "CC": 0.78076171875,
+      "FC_obs": 0.8173828125,
+      "FC_unobs": 0.8017578125,
+      "CF1": 0.791120482682814
+    },
+    "Male|g3": {
+      "attr": "Male",
+      "g": 3.0,
+      "CC": 0.861328125,
+      "FC_obs": 0.794921875,
+      "FC_unobs": 0.7730305989583334,
+      "CF1": 0.8147941900487974
+    },
+    "Male|g4": {
+      "attr": "Male",
+      "g": 4.0,
+      "CC": 0.89697265625,
+      "FC_obs": 0.7805989583333334,
+      "FC_unobs": 0.7560221354166666,
+      "CF1": 0.8204879850888637
+    },
+    "Male|g5": {
+      "attr": "Male",
+      "g": 5.0,
+      "CC": 0.91943359375,
+      "FC_obs": 0.7685546875,
+      "FC_unobs": 0.7432454427083334,
+      "CF1": 0.8220045041083403
+    },
+    "Male|g6": {
+      "attr": "Male",
+      "g": 6.0,
+      "CC": 0.93408203125,
+      "FC_obs": 0.7600911458333334,
+      "FC_unobs": 0.7322862413194444,
+      "CF1": 0.8209654864508212
+    },
+    "Young|g2": {
+      "attr": "Young",
+      "g": 2.0,
+      "CC": 0.71484375,
+      "FC_obs": 0.90283203125,
+      "FC_unobs": 0.8493381076388888,
+      "CF1": 0.7763087583677292
+    },
+    "Young|g3": {
+      "attr": "Young",
+      "g": 3.0,
+      "CC": 0.77099609375,
+      "FC_obs": 0.88037109375,
+      "FC_unobs": 0.8076714409722222,
+      "CF1": 0.7889077495124235
+    },
+    "Young|g4": {
+      "attr": "Young",
+      "g": 4.0,
+      "CC": 0.8076171875,
+      "FC_obs": 0.85888671875,
+      "FC_unobs": 0.7759060329861112,
+      "CF1": 0.79144409127409
+    },
+    "Young|g5": {
+      "attr": "Young",
+      "g": 5.0,
+      "CC": 0.837890625,
+      "FC_obs": 0.840576171875,
+      "FC_unobs": 0.7508409288194444,
+      "CF1": 0.7919809657102121
+    },
+    "Young|g6": {
+      "attr": "Young",
+      "g": 6.0,
+      "CC": 0.85400390625,
+      "FC_obs": 0.8203125,
+      "FC_unobs": 0.7322591145833334,
+      "CF1": 0.7884595883888261
+    },
+    "Beard|g2": {
+      "attr": "Beard",
+      "g": 2.0,
+      "CC": 0.94580078125,
+      "FC_obs": 0.920654296875,
+      "FC_unobs": 0.8206922743055556,
+      "CF1": 0.8788162418899723
+    },
+    "Beard|g3": {
+      "attr": "Beard",
+      "g": 3.0,
+      "CC": 0.98583984375,
+      "FC_obs": 0.901611328125,
+      "FC_unobs": 0.7914767795138888,
+      "CF1": 0.878030773396839
+    },
+    "Beard|g4": {
+      "attr": "Beard",
+      "g": 4.0,
+      "CC": 0.9951171875,
+      "FC_obs": 0.88525390625,
+      "FC_unobs": 0.7727593315972222,
+      "CF1": 0.8699545294782188
+    },
+    "Beard|g5": {
+      "attr": "Beard",
+      "g": 5.0,
+      "CC": 0.99658203125,
+      "FC_obs": 0.870849609375,
+      "FC_unobs": 0.7574869791666666,
+      "CF1": 0.8607391246984318
+    },
+    "Beard|g6": {
+      "attr": "Beard",
+      "g": 6.0,
+      "CC": 0.9970703125,
+      "FC_obs": 0.851806640625,
+      "FC_unobs": 0.7465277777777778,
+      "CF1": 0.8537984628788351
+    },
+    "Bald|g2": {
+      "attr": "Bald",
+      "g": 2.0,
+      "CC": 0.45556640625,
+      "FC_obs": 0.801513671875,
+      "FC_unobs": 0.8405219184027778,
+      "CF1": 0.5908757026164738
+    },
+    "Bald|g3": {
+      "attr": "Bald",
+      "g": 3.0,
+      "CC": 0.623046875,
+      "FC_obs": 0.727294921875,
+      "FC_unobs": 0.7948404947916666,
+      "CF1": 0.6985362828588648
+    },
+    "Bald|g4": {
+      "attr": "Bald",
+      "g": 4.0,
+      "CC": 0.7373046875,
+      "FC_obs": 0.676025390625,
+      "FC_unobs": 0.7601996527777778,
+      "CF1": 0.7485771524708356
+    },
+    "Bald|g5": {
+      "attr": "Bald",
+      "g": 5.0,
+      "CC": 0.81396484375,
+      "FC_obs": 0.637939453125,
+      "FC_unobs": 0.7350531684027778,
+      "CF1": 0.7724990060449978
+    },
+    "Bald|g6": {
+      "attr": "Bald",
+      "g": 6.0,
+      "CC": 0.8662109375,
+      "FC_obs": 0.60791015625,
+      "FC_unobs": 0.7146538628472222,
+      "CF1": 0.783167532592189
+    },
+    "Beard|g1": {
+      "attr": "Beard",
+      "g": 1.0,
+      "CC": 0.7763671875,
+      "FC_obs": 0.936767578125,
+      "FC_unobs": 0.8694932725694444,
+      "CF1": 0.8202955997210455
+    },
+    "Beard|g1.5": {
+      "attr": "Beard",
+      "g": 1.5,
+      "CC": 0.88720703125,
+      "FC_obs": 0.929931640625,
+      "FC_unobs": 0.8416341145833334,
+      "CF1": 0.8638199131225287
+    }
+  },
+  "null_set_ablation_all4": {
+    "Male|g5": {
+      "attr": "Male",
+      "g": 5.0,
+      "CC": 0.65234375,
+      "FC_obs": 0.8479817708333334,
+      "FC_unobs": 0.769287109375,
+      "CF1": 0.7060055491155761
+    },
+    "Young|g3": {
+      "attr": "Young",
+      "g": 3.0,
+      "CC": 0.66064453125,
+      "FC_obs": 0.898193359375,
+      "FC_unobs": 0.80126953125,
+      "CF1": 0.7241935041958918
+    },
+    "Beard|g2": {
+      "attr": "Beard",
+      "g": 2.0,
+      "CC": 0.9384765625,
+      "FC_obs": 0.91552734375,
+      "FC_unobs": 0.8121744791666666,
+      "CF1": 0.8707694397313128
+    },
+    "Bald|g6": {
+      "attr": "Bald",
+      "g": 6.0,
+      "CC": 0.7998046875,
+      "FC_obs": 0.671630859375,
+      "FC_unobs": 0.7208116319444444,
+      "CF1": 0.7582563920454546
+    }
+  },
+  "fc_floor_null_intervention": {
+    "null1_target|g3": {
+      "CC_sanity": 0.994140625,
+      "FC_obs_floor": 0.9627278645833334,
+      "FC_unobs_floor": 0.9621256510416667
+    },
+    "null1_target|g4": {
+      "CC_sanity": 0.9951171875,
+      "FC_obs_floor": 0.9435221354166666,
+      "FC_unobs_floor": 0.9469889322916667
+    },
+    "null1_target|g5": {
+      "CC_sanity": 0.99658203125,
+      "FC_obs_floor": 0.9231770833333334,
+      "FC_unobs_floor": 0.9300455729166667
+    },
+    "null2_target_beard|g3": {
+      "CC_sanity": 0.99072265625,
+      "FC_obs_floor": 0.91943359375,
+      "FC_unobs_floor": 0.9126953125
+    },
+    "null2_target_beard|g4": {
+      "CC_sanity": 0.9892578125,
+      "FC_obs_floor": 0.8914388020833334,
+      "FC_unobs_floor": 0.8903483072916667
+    },
+    "null2_target_beard|g5": {
+      "CC_sanity": 0.990234375,
+      "FC_obs_floor": 0.8639322916666666,
+      "FC_unobs_floor": 0.8712890625
+    },
+    "null4_all|g3": {
+      "CC_sanity": 0.98681640625,
+      "FC_obs_floor": 0.90087890625,
+      "FC_unobs_floor": 0.88408203125
+    },
+    "null4_all|g4": {
+      "CC_sanity": 0.98681640625,
+      "FC_obs_floor": 0.8517252604166666,
+      "FC_unobs_floor": 0.8547526041666667
+    },
+    "null4_all|g5": {
+      "CC_sanity": 0.9892578125,
+      "FC_obs_floor": 0.7854817708333334,
+      "FC_unobs_floor": 0.8249837239583333
+    }
+  },
+  "fc_floor_caveat": "The control predates per-attribute FC storage, so its FC_unobs floor is over the earlier 22-reader set, not the 28 used elsewhere. Re-run it if you need them on the same basis."
+}

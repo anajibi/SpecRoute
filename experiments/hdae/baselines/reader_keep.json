@@ -1,0 +1,61 @@
+{
+  "criterion": "F1 < 0.55 on the partition-0 selection slice (2400 images, never in the cohort)",
+  "threshold": 0.55,
+  "observed": [
+    "Male",
+    "Young",
+    "Beard",
+    "Bald"
+  ],
+  "cut": [
+    "Blurry",
+    "Chubby",
+    "Double_Chin",
+    "Mustache",
+    "Narrow_Eyes",
+    "Oval_Face",
+    "Pale_Skin",
+    "Wearing_Necklace"
+  ],
+  "fc_unobs": [
+    "5_o_Clock_Shadow",
+    "Arched_Eyebrows",
+    "Attractive",
+    "Bags_Under_Eyes",
+    "Bangs",
+    "Big_Lips",
+    "Big_Nose",
+    "Black_Hair",
+    "Blond_Hair",
+    "Brown_Hair",
+    "Bushy_Eyebrows",
+    "Eyeglasses",
+    "Goatee",
+    "Gray_Hair",
+    "Heavy_Makeup",
+    "High_Cheekbones",
+    "Mouth_Slightly_Open",
+    "Pointy_Nose",
+    "Receding_Hairline",
+    "Rosy_Cheeks",
+    "Sideburns",
+    "Smiling",
+    "Straight_Hair",
+    "Wavy_Hair",
+    "Wearing_Earrings",
+    "Wearing_Hat",
+    "Wearing_Lipstick",
+    "Wearing_Necktie"
+  ],
+  "cut_f1": {
+    "Blurry": 0.0333,
+    "Chubby": 0.4801,
+    "Double_Chin": 0.5336,
+    "Mustache": 0.532,
+    "Narrow_Eyes": 0.5229,
+    "Oval_Face": 0.5141,
+    "Pale_Skin": 0.5119,
+    "Wearing_Necklace": 0.497
+  },
+  "note": "Selection was made on partition 0 only. Threshold fitting and tuning may use the cohort (partitions 1-2); attribute SELECTION may not, or the surviving readers would be those that happen to look good on the evaluation set."
+}

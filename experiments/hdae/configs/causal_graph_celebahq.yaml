@@ -1,0 +1,66 @@
+# Causal DAG over the four CelebA-HQ attributes this study conditions on.
+#
+# Unlike Causal3DIdent and MorphoMNIST, CelebA-HQ has NO ground-truth generative process: these
+# are human annotations of real photographs, so the graph is ASSERTED, not recovered. Only the
+# edge directions are assumed here; every conditional P(child | parents) is fitted to the 30,000
+# real rows by causal/train_scm.py, so descendant magnitudes come from the data.
+#
+# Structure (approved 2026-09-24):
+#
+#     Male ----+----> Beard
+#              |
+#              +----> Bald
+#     Young ---+----> Beard
+#              |
+#              +----> Bald
+#
+# Male and Young are asserted INDEPENDENT roots. The data disagrees -- P(Young|Male)=0.602 vs
+# P(Young|Female)=0.882 -- but that association is a sampling artifact of who gets photographed,
+# not a mechanism, and encoding it would make every do(Male) silently shift apparent age. The
+# consequence is deliberate and must not be read as a bug: when SCM samples are validated against
+# the data marginals, the Male x Young joint WILL mismatch while each marginal matches.
+#
+# The four measured dependencies the fitted mechanisms have to reproduce:
+#   P(Beard | Male)  = 0.5121     P(Beard | Female) = 0.0005
+#   P(Bald  | Male)  = 0.0643     P(Bald  | Female) = 0.0001
+#   P(Beard | Young) = 0.1523     P(Beard | Old)    = 0.3188
+#   P(Bald  | Young) = 0.0059     P(Bald  | Old)    = 0.0866
+#
+# All four nodes are binary, so the SCM's root-only restriction on CATEGORICAL nodes does not
+# apply -- binary children with parents are supported (causal/scm.py NodeSpec).
+#
+# `Beard` is a derived column (index 40) appended to celebahq_256_attrs.npz as -No_Beard. CelebA
+# ships the inverted attribute; deriving it once here keeps every downstream table, grid label
+# and edge reading in the positive sense.
+#
+# SPARSITY WARNING, carried deliberately. Some combinations are near-absent from the data:
+#     Bald & Female        1 image  in 30,000
+#     Beard & Female      10 images
+#     Bald & Young       138 images
+# Interventions are therefore restricted to attested combinations (decision of 2026-09-24), so
+# do(Bald=1) is never requested of a female subject. Every reported counterfactual is one the
+# training distribution actually supports; the cost is that off-distribution generalisation --
+# arguably the point of a causal model -- goes unmeasured by this protocol.
+attributes: [Male, Young, Beard, Bald]
+edges:
+  - [Male, Beard]
+  - [Male, Bald]
+  - [Young, Beard]
+  - [Young, Bald]
+
+nodes:
+  Male:
+    kind: binary
+    # CelebA codes attributes as {-1, +1}, not {0, 1}.
+    range: [-1.0, 1.0]
+  Young:
+    kind: binary
+    range: [-1.0, 1.0]
+  Beard:
+    kind: binary
+    range: [-1.0, 1.0]
+  Bald:
+    kind: binary
+    range: [-1.0, 1.0]
+
+scm_checkpoint: experiments/hdae/outputs/scm/celebahq_scm.pt

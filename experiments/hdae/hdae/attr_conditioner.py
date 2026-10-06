@@ -96,9 +96,20 @@ def load_cond_specs(causal_graph_path: str, conditioning_attrs: Sequence[str]) -
             lo, hi = n["range"]
             specs.append(AttrCondSpec(name=name, kind="continuous", lo=float(lo), hi=float(hi),
                                       dim=int(n.get("dim", 1))))
+        elif kind == "binary":
+            # A binary attribute IS a 2-class categorical to the conditioner; the kinds differ
+            # only for the SCM, where `binary` nodes may have parents and `categorical` ones may
+            # not (causal/scm.py refuses parent-conditioned categoricals -- they would need
+            # Gumbel-max abduction). CelebA stores {-1, +1}, so lo/hi are -1/1 and the existing
+            # binning maps -1 -> 0 and +1 -> 1: frac = (v-lo)/(hi-lo) gives 0 and 1, times
+            # num_classes gives 0 and 2, and the clamp brings 2 back to 1.
+            lo, hi = n.get("range", (-1.0, 1.0))
+            specs.append(AttrCondSpec(name=name, kind="categorical", num_classes=2,
+                                      lo=float(lo), hi=float(hi), dim=int(n.get("dim", 1))))
         else:
             raise ValueError(f"{causal_graph_path}: node {name!r} has kind={kind!r}, "
-                             "only categorical/continuous are supported as model conditioning attrs")
+                             "only binary/categorical/continuous are supported as model "
+                             "conditioning attrs")
     return specs
 
 

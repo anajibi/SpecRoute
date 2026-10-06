@@ -104,6 +104,20 @@ def main():
     else:
         print('no checkpoint found -- training from scratch')
 
+    # An explicit `resume_from` seeds a NEW output dir from an existing checkpoint as a TRUE
+    # Lightning resume: weights + Adam moments + GradScaler state + global_step, not just
+    # weights. This exists because `init_from` is weights-only, and restarting Adam cold on
+    # already-converged weights is what destroyed celebahq256_k11_cd015 -- grad norms crept
+    # 0.006 -> 0.042 over ~400 steps and then went non-finite, with the loss flat at 0.012
+    # the whole way. Only used when the output dir has no checkpoint of its own to resume.
+    if resume is None and t.get('resume_from'):
+        rf = t['resume_from']
+        rf = str(ROOT / rf) if not os.path.isabs(rf) else rf
+        if not os.path.exists(rf):
+            raise FileNotFoundError(f'resume_from not found: {rf}')
+        resume = rf
+        print(f'RESUME_FROM: {rf} (full state: weights + optimizer + scaler)')
+
     # Checkpoint cadence is config-driven: save_top_k=-1 keeps every snapshot, so
     # `checkpoint_every_n_steps` alone decides how many land on disk over the run.
     ckpt_every = int(t.get('checkpoint_every_n_steps', 1000))
@@ -118,6 +132,12 @@ def main():
         ),
         LearningRateMonitor('step')
     ]
+    from experiments.hdae.hdae.nan_tracer import maybe_tracer
+    _tr = maybe_tracer()
+    if _tr is not None:
+        callbacks.append(_tr)
+        print('[nan_tracer] ACTIVE ->', _tr.path, 'stop_after=', _tr.stop_after)
+
     n_img_ep = int(t.get('log_images_every_n_epochs', 0))
     if n_img_ep > 0:
         from experiments.hdae.hdae.image_logger import ImageLogCallback
@@ -143,6 +163,39 @@ def main():
     )
 
     lit = HDAELitModule(cfg.train_conf)
+
+    # Initialise from a vanilla DiffAE checkpoint when the config asks for it, but ONLY on a
+    # fresh run: `resume` already carries the full model, and overwriting it with pretrained
+    # weights would silently rewind every step of progress.
+    init_from = t.get('init_from')
+    if init_from and not resume:
+        from experiments.hdae.hdae.pretrained_init import load_pretrained_into
+        _p = str(ROOT / init_from) if not Path(init_from).is_absolute() else init_from
+        info = load_pretrained_into(lit.model, _p)
+        # EMA handling differs between the two kinds of init_from:
+        #
+        #   vanilla DiffAE checkpoint -> its ema_model IS the weights we just loaded, so copying
+        #     the model into EMA is correct and avoids sampling from a half-random network for
+        #     the first ~1/(1-decay) steps.
+        #   CONTINUATION from one of our own runs -> the checkpoint carries a real EMA that is
+        #     better than the raw weights and represents thousands of steps of averaging.
+        #     Overwriting it with the model would discard that and make every early checkpoint
+        #     look like a regression for no reason. Load it instead.
+        import torch as _t
+        _raw = _t.load(_p, map_location="cpu")
+        _sd = _raw.get("state_dict", _raw)
+        _ema = {k[len("ema_model."):]: v for k, v in _sd.items() if k.startswith("ema_model.")}
+        _tgt = lit.ema_model.state_dict()
+        if _ema and set(_tgt).issubset(_ema):
+            lit.ema_model.load_state_dict({k: _ema[k] for k in _tgt})
+            print(f"[init] CONTINUATION: EMA carried over from {Path(_p).name} "
+                  f"({info['fraction']*100:.1f}% of model weights loaded)")
+        else:
+            lit.ema_model.load_state_dict(lit.model.state_dict())
+            print(f"[init] EMA seeded from the same weights ({info['fraction']*100:.1f}% pretrained)")
+        del _raw, _sd, _ema
+    elif init_from and resume:
+        print(f"[init] ignoring init_from -- resuming from {resume}")
     if t.get('compile'):
         # train.compile was a dead config key until now -- nothing read it, so setting it
         # true silently did nothing. See HDAELitModule.enable_compile for why only a side
