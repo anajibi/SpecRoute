@@ -87,7 +87,7 @@ train:
   compile: false
   # Required at 256: without it batch 8 needs more than 40 GB.
   use_checkpoint: true
-  resume_from: "experiments/hdae/outputs/celebahq256_k1_p2/checkpoints/last.ckpt"
+  resume_from: "experiments/hdae/outputs/celebahq256_k1/checkpoints/last.ckpt"
 lightning:
   accelerator: gpu
   devices: 1

@@ -99,6 +99,10 @@ comparison is confounded with the dropout schedule.
 
 Configs: `celebahq256_k{3,5,7}_p1.yaml` then `..._p2.yaml`.
 **k=1 already has p1** (trained to 31,250 at 0.10/0.08), so it needs only `celebahq256_k1_p2.yaml`.
+Its checkpoint is not on local disk — restore it first:
+
+    aws s3 cp s3://najibi-research-7f2a/hdae-handoff/celebahq256/k1/epoch=83-step=31250.ckpt \
+      experiments/hdae/outputs/celebahq256_k1/checkpoints/last.ckpt
 k=11 is complete as `celebahq256_k11_cd015r`.
 
 ---
