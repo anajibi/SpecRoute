@@ -1,0 +1,117 @@
+# CelebA-HQ 256, k=11 -- CONTINUATION of celebahq256_k11 with a stronger unconditional branch.
+#
+# Why: the guidance direction is too weak. Measured on the finished run,
+# |eps_cond - eps_null| is 0.00465, i.e. 1-8% of the signal depending on timestep. That is what
+# an under-trained null branch looks like, and it forces high g to get any edit, which is what
+# produced the noise. cfg_drop_prob 0.10 -> 0.15 gives the unconditional pass 50% more training.
+#
+# 0.15 rather than 0.20 deliberately: cfg_drop_prob 0.20 was tested on MorphoMNIST (config
+# tune_cd020) and came out measurably WORSE, -0.0449 CC with a bootstrap interval excluding zero.
+# That was a from-scratch run on a different dataset, so it does not transfer directly, but it is
+# the only evidence we have on this knob and it points the wrong way.
+#
+# The diffusion objective itself is already converged -- loss flat from decile 4 of the original
+# run, terminal slope +1.1e-09 -- so this is NOT more of the same training. Only the null branch
+# has something new to learn, which is why 1M samples rather than another 2M.
+#
+# WHY PRETRAINED: from scratch at 256 is DiffAE's own 200M-sample budget, which is ~96 days on a
+# single A100. Starting from ffhq256_autoenc, 95.8% of this model is already trained (168.5M of
+# 175.9M) -- the whole UNet decoder, middle block, time embedding and encoder backbone. Only the
+# tap heads, per-block FiLM and attribute embedding are new. Those FFHQ weights already
+# reconstruct held-out CelebA-HQ at 36.35 dB PSNR / 0.0224 MAE with no adaptation at all
+# (outputs/recon_baseline.json), so the decoder needs no repair; what is being learned here is
+# the hierarchy and the conditioning.
+base_template: ffhq256_autoenc
+data:
+  type: celebahq
+  image_size: 256
+  lmdb_path: "experiments/hdae/data/packed/celebahq_256.lmdb"
+  attr_npz: "experiments/hdae/data/packed/celebahq_256_attrs.npz"
+  flip_aug: true
+encoder:
+  type: hierarchical
+  # 11 taps over the encoder's input blocks plus the middle block, matching the MorphoMNIST and
+  # Causal3DIdent k=11 ladders so depth is comparable across datasets.
+  hier_tap_block_ids: [0, 3, 6, 9, mid]
+  # Sum is 512 = the semantic width of vanilla ffhq256_autoenc, so total latent capacity matches
+  # the model we initialise from. (MorphoMNIST used 256 at 64px; that was its backbone's width.)
+  hier_level_dims: [103, 103, 102, 102, 102]
+  # 256px has EIGHTEEN decoder output blocks, not the twelve of 64px -- measured, not assumed:
+  #   64px  -> 15 encoder input blocks, 12 decoder output blocks,  90.8M params
+  #   128px -> 18 / 15, 128.5M
+  #   256px -> 21 / 18, 168.5M
+  # Levels are spread evenly across the 18 blocks via floor(i*11/18), so every one of the 11
+  # taps modulates the decoder somewhere; a front-loaded mapping would leave deep taps unused.
+  n_decoder_output_blocks: 18
+  hier_block_to_level: [0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 4, 4, 4]
+  n_attributes: 4
+  conditioning_attrs: [Male, Young, Beard, Bald]
+  causal_graph_path: "experiments/hdae/configs/causal_graph_celebahq.yaml"
+  # Carried from the MorphoMNIST sweep, where attr_embed_dim was the ONLY knob with an effect
+  # that survived a paired bootstrap (+0.1124 CC at 256 over 128). 384 won there on a 3-seed mean.
+  attr_embed_dim: 384
+  # 0.08 -> 0.12: independent per-attribute nulling. TargetNullCFG nulls exactly ONE
+  # attribute at inference, and at 0.08 only 21.2% of training samples showed that
+  # configuration. 0.12 lifts it to 28.1% while keeping 50.8% fully conditioned
+  # (0.15 would have cut the fully-conditioned path to 44.4%).
+  attr_dropout_prob: 0.08
+  fourier_freqs: 16          # 8 and 32 were both indistinguishable from 16; 0 was much worse
+  fourier_max_freq: 1000.0   # 100 was indistinguishable
+  attr_norm: true            # `nonorm` won alone but LOST combined with a wider embed
+  hier_proj: linear
+conditioning:
+  strategy: per_block_attr
+  style_ch: 512
+  latent_drop_prob: 0.0
+  cfg_drop_prob: 0.1        # was 0.10; see header
+  cfg_guidance_scale: 3.0
+  attr_fusion: concat_film   # `sum` was the worst config of the thirteen tested
+train:
+  # batch 8 x accum 8 = 64, which is EXACTLY what DiffAE used for ffhq256 (batch_size=64 over
+  # 8xV100, i.e. 8 per card). The model has 117 GroupNorm and ZERO BatchNorm layers, so no layer
+  # statistic depends on batch size -- only gradient noise does, and accumulation makes that
+  # identical to a true batch of 64. Measured here: batch 8 = 22.9 GB / 24.2 samples/s;
+  # batch 12 = 33.1 GB / 26.0 samples/s (7% faster but too close to the 40 GB ceiling for a
+  # 23-hour run); batch 16 OOMs.
+  batch_size_per_gpu: 8
+  accum_batches: 8
+  total_batch_size: 64       # validated against the product above; config_io raises on mismatch
+  lr: 1.0e-4                 # NOT decayed: a true resume restores param_groups from the
+                             # checkpoint, so the checkpoint's 1e-4 is what actually runs.
+                             # Kept deliberately -- warm Adam moments make it safe. (was:
+                             # fine-tune of mostly-converged weights, and the usual linear-scaling
+                             # argument applies to from-scratch training.
+  ema_decay: 0.9999
+  T: 1000
+  T_eval: 100
+  # 31,250 OPTIMISER steps. PL 1.9's global_step counts optimiser steps, not micro-batches, so
+  # this is 31,250 x 64 = 2,000,000 samples = 250,000 forward/backward passes. At the measured
+  # 24.2 samples/s that is ~23 h.
+  # global_step RESUMES at 31,250, so max_steps is absolute, not additional:
+  # 31,250 + 15,625 = 46,875 gives the intended 1M extra samples. A value of
+  # 15,625 here would exit instantly, already past the limit.
+  max_steps: 31250
+  # every 3,125 steps = 200k samples = 10 checkpoints across the run. Dense on purpose: the
+  # MorphoMNIST 96,469-step run peaked at step 36,000 and then decayed monotonically for 60,000
+  # more steps. A single end-of-run checkpoint cannot see that, and here we have no prior at all
+  # for how long a pretrained fine-tune needs.
+  checkpoint_every_n_steps: 3125
+  save_top_k: -1
+  log_images_every_n_epochs: 0
+  log_images_n: 8
+  precision: 16-mixed
+  grad_clip: 1.0
+  num_workers: 8
+  compile: false
+  # Required at 256: without it batch 8 needs more than 40 GB.
+  use_checkpoint: true
+  # From scratch on the ffhq256 transfer. See configs/LADDER_PROTOCOL.md.
+  init_from: "experiments/hdae/pretrained/ffhq256_autoenc_model.pt"
+lightning:
+  accelerator: gpu
+  devices: 1
+  strategy: auto
+  log_every_n_steps: 25
+  val_check_interval: 1.0
+seed: 42
+output_dir: experiments/hdae/outputs/celebahq256_k5_p1
