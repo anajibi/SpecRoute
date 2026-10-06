@@ -40,7 +40,7 @@ subset** of k=11's, so each rung is a coarsening of the one below it rather than
     attr_fusion         concat_film  # `sum` was the worst of thirteen configs tested
     style_ch            512
     latent_drop_prob    0.0
-    cfg_drop_prob / attr_dropout_prob  -- phase-dependent, see §3a
+    cfg_drop_prob / attr_dropout_prob  -- phase-dependent, see §4
     attributes          Male, Young, Beard, Bald  (binary, range [-1, 1])
 
 ### Optimisation
@@ -61,23 +61,6 @@ evaluation.
 ### Schedule
     checkpoint_every_n_steps 3125
     save_top_k               -1
-
-## 3a. Two phases, because k=11 was trained that way
-
-k=11 was not trained at one dropout setting. It ran 31,250 steps at the lower setting, then was
-resumed for 15,625 more at the raised one. Every other rung must replicate that, or the depth
-comparison is confounded with the dropout schedule.
-
-| phase | steps (absolute) | cfg_drop_prob | attr_dropout_prob | init |
-|---|---|---|---|---|
-| p1 | 31,250 | 0.10 | 0.08 | `init_from` ffhq256_autoenc |
-| p2 | 46,875 | 0.15 | 0.12 | `resume_from` the p1 checkpoint |
-
-Configs: `celebahq256_k{3,5,7}_p1.yaml` then `..._p2.yaml`.
-**k=1 already has p1** (trained to 31,250 at 0.10/0.08), so it needs only `celebahq256_k1_p2.yaml`.
-k=11 is complete as `celebahq256_k11_cd015r`.
-
----
 
 ## 3. Initialisation — the part that breaks if you get it wrong
 
@@ -103,7 +86,24 @@ the loss flat at 0.012, then went non-finite at optimiser step **423**. Reproduc
 
 ---
 
-## 4. Safety rails
+## 4. Two phases, because k=11 was trained that way
+
+k=11 was not trained at one dropout setting. It ran 31,250 steps at the lower setting, then was
+resumed for 15,625 more at the raised one. Every other rung must replicate that, or the depth
+comparison is confounded with the dropout schedule.
+
+| phase | steps (absolute) | cfg_drop_prob | attr_dropout_prob | init |
+|---|---|---|---|---|
+| p1 | 31,250 | 0.10 | 0.08 | `init_from` ffhq256_autoenc |
+| p2 | 46,875 | 0.15 | 0.12 | `resume_from` the p1 checkpoint |
+
+Configs: `celebahq256_k{3,5,7}_p1.yaml` then `..._p2.yaml`.
+**k=1 already has p1** (trained to 31,250 at 0.10/0.08), so it needs only `celebahq256_k1_p2.yaml`.
+k=11 is complete as `celebahq256_k11_cd015r`.
+
+---
+
+## 5. Safety rails
 
     HDAE_NAN_TRACE=<path> HDAE_NAN_TRACE_ABORT=1 python experiments/hdae/scripts/train.py --config ...
 
@@ -120,7 +120,7 @@ throughput of running them sequentially.
 
 ---
 
-## 5. Evaluation — identical for every rung
+## 6. Evaluation — identical for every rung
 
 Use the frozen kit in `experiments/hdae/baselines/`:
 
@@ -137,7 +137,7 @@ Scripts: `gsweep_attrs_celebahq.py`, `nullctrl_celebahq.py`, `ablation_nullset_c
 
 ---
 
-## 6. Budget
+## 7. Budget
 
 At ~1,360 optimiser-steps/hour measured on one A100:
 
@@ -157,7 +157,7 @@ matched conditions is worth more than 1/3/5/7/11 with mismatched ones.
 
 ---
 
-## 7. One deliberate exclusion
+## 8. One deliberate exclusion
 
 The strongest single lever identified is **oversampling rare-attribute positives**. Bald is 2.4% of
 the training set (582 images), needs g=6, and loses 23.2% of achievable preservation; Beard is 18.9%,
