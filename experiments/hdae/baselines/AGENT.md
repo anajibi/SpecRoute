@@ -28,6 +28,8 @@ Conditioned attributes: **Male, Young, Beard, Bald**. Everything else is uncondi
 A=s3://najibi-research-7f2a/hdae-handoff
 aws s3 cp $A/data_packed/celebahq_256_pack.tar.gz .   # 4 GB  -> celebahq_256.lmdb + attrs npz
 aws s3 cp $A/celebahq256/readers40_per_attribute.tar.gz .  # 3.7 GB -> single/<attr>.pt x40
+#   NOTE: ignore attr_predictors_celebahq256.tar.gz in the same prefix. That is an older
+#   shared-backbone set, superseded by the 40 per-attribute readers above.
 aws s3 cp $A/celebahq256/baseline_kit.tar.gz .        # scorer, cohort, keep list, reference
 aws s3 cp $A/celebahq256/ffhq256_autoenc_model.pt .   # 1.3 GB, for a DiffAE-family baseline
 ```
@@ -66,6 +68,9 @@ for a single deterministic counterfactual. The scorer treats it as opaque.
 ```bash
 python score_counterfactuals.py --root <root> --readers <dir of .pt> --out results.json
 ```
+
+The scorer resolves `cohort_2048.json` and `reader_keep.json` next to itself, so it runs from the
+unpacked kit anywhere on disk; you do not need a repo checkout to score.
 
 **Sweep the strength parameter.** Our data shows the optimum varies 3x across attributes of the
 same model (Beard best at 2, Bald at 6). A single fixed strength handicaps some attributes badly.

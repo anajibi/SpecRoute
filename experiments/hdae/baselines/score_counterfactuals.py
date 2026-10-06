@@ -37,7 +37,10 @@ THRESHOLDS
 import argparse, glob, json, os, sys
 import numpy as np, torch, torch.nn as nn
 from PIL import Image
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
+# Resolve companion files relative to THIS script, so the kit works unpacked on its own as
+# well as from a repo checkout. An agent that downloads baseline_kit.tar.gz and runs it from
+# anywhere should not have to pass --cohort/--keep by hand.
+_HERE = os.path.dirname(os.path.abspath(__file__))
 from torchvision import models
 
 MEAN = torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1)
@@ -86,8 +89,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--root", required=True, help="directory holding recon/ and <attr>/<strength>/")
     ap.add_argument("--readers", required=True, help="dir of per-attribute .pt readers")
-    ap.add_argument("--cohort", default="experiments/hdae/baselines/cohort_2048.json")
-    ap.add_argument("--keep", default="experiments/hdae/baselines/reader_keep.json",
+    ap.add_argument("--cohort", default=os.path.join(_HERE, "cohort_2048.json"))
+    ap.add_argument("--keep", default=os.path.join(_HERE, "reader_keep.json"),
                     help="which readers are trustworthy enough to score FC_unobs")
     ap.add_argument("--out", default="baseline_results.json")
     ap.add_argument("--bs", type=int, default=32)
