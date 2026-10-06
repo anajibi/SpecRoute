@@ -29,13 +29,19 @@ A=s3://najibi-research-7f2a/hdae-handoff
 aws s3 cp $A/data_packed/celebahq_256_pack.tar.gz .   # 4 GB  -> celebahq_256.lmdb + attrs npz
 aws s3 cp $A/celebahq256/readers40_per_attribute.tar.gz .  # 3.7 GB -> single/<attr>.pt x40
 aws s3 cp $A/celebahq256/baseline_kit.tar.gz .        # scorer, cohort, keep list, reference
-aws s3 cp $A/celebahq256/code_snapshot.tar.gz .       # repo code (branch celebahq-ladder)
 aws s3 cp $A/celebahq256/ffhq256_autoenc_model.pt .   # 1.3 GB, for a DiffAE-family baseline
 ```
 
-Repo: `git@github.com:anajibi/SpecRoute.git`, branch **`celebahq-ladder`**. The CelebA-HQ 256 work
-was uncommitted when this snapshot was taken, so **use the snapshot, not a fresh clone**, or you
-will get the Causal3DIdent-era code.
+**Code comes from git, not S3:**
+
+```bash
+git clone git@github.com:anajibi/SpecRoute.git
+cd SpecRoute && git checkout celebahq-ladder      # commit 4f712b3 or later
+```
+
+Everything you need is on that branch: `experiments/hdae/baselines/` (this kit),
+`experiments/hdae/scripts/*celebahq*.py` (the evaluation code), `experiments/hdae/configs/`,
+and `diffae_upstream/`. S3 holds only data, weights and results.
 
 Python env: torch + torchvision (ConvNeXt), lmdb, numpy, PIL. The readers are
 torchvision `convnext_small` with a 1-unit head, fp16 weights, 256px input.
