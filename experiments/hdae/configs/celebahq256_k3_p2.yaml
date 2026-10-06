@@ -106,7 +106,7 @@ train:
   # Required at 256: without it batch 8 needs more than 40 GB.
   use_checkpoint: true
   # Phase 2: TRUE resume of phase 1 at the raised dropout, mirroring k=11's cd015r.
-  resume_from: "experiments/hdae/outputs/celebahq256_k3_p2_p1/checkpoints/last.ckpt"
+  resume_from: "experiments/hdae/outputs/celebahq256_k3_p1/checkpoints/last.ckpt"
 lightning:
   accelerator: gpu
   devices: 1
