@@ -1,0 +1,38 @@
+# Graph B over CelebA-HQ: two INDEPENDENT attributes and the image.
+#
+#     Eyeglasses ──┐
+#                  ├──> image
+#     Smiling   ───┘
+#
+# No edges between the attributes. This is the point of the graph, not a simplification: with
+# nothing to propagate, every intervention is licensed to change exactly one thing, so any
+# movement elsewhere is unambiguously collateral damage. Graph A entangles propagation with
+# preservation (Male -> Beard/Bald), which makes its FC numbers harder to attribute.
+#
+# As with graph A the structure is ASSERTED -- these are human annotations of real photographs
+# with no ground-truth generative process. Independence is close to true in the data but not
+# exact: P(Smiling | Eyeglasses) = 0.4060 vs P(Smiling | no Eyeglasses) = 0.4730, a 6.7-point
+# negative association. Asserting independence means SCM samples will reproduce each marginal
+# while mismatching that joint slightly. This is the same deliberate trade made for Male/Young
+# in graph A and must not be read as a fitting bug.
+#
+# Measured prevalences on the 30,000 packed rows (consistent across partitions):
+#   Eyeglasses  0.0489   (p0 0.0488 / p1 0.0503 / p2 0.0490)
+#   Smiling     0.4697   (p0 0.4714 / p1 0.4600 / p2 0.4660)
+#
+# Eyeglasses at 4.9% is rare -- comparable to Bald's 2.4% in graph A, which needed the highest
+# guidance of any attribute and paid the largest preservation cost. Expect the same shape here.
+# Smiling at 47% is the most balanced attribute either graph has had.
+attributes: [Eyeglasses, Smiling]
+edges: []
+
+nodes:
+  Eyeglasses:
+    kind: binary
+    # CelebA codes attributes as {-1, +1}, not {0, 1}.
+    range: [-1.0, 1.0]
+  Smiling:
+    kind: binary
+    range: [-1.0, 1.0]
+
+scm_checkpoint: experiments/hdae/outputs/scm/celebahq_b_scm.pt
