@@ -1,0 +1,56 @@
+{
+ "graph": "B",
+ "conditioning_attrs": [
+  "Eyeglasses",
+  "Smiling"
+ ],
+ "criterion": "F1 < 0.55 on the partition-0 selection slice (2400 images, never in the cohort)",
+ "threshold": 0.55,
+ "observed": [
+  "Eyeglasses",
+  "Smiling"
+ ],
+ "fc_unobs": [
+  "5_o_Clock_Shadow",
+  "Arched_Eyebrows",
+  "Attractive",
+  "Bags_Under_Eyes",
+  "Bald",
+  "Bangs",
+  "Beard",
+  "Big_Lips",
+  "Big_Nose",
+  "Black_Hair",
+  "Blond_Hair",
+  "Brown_Hair",
+  "Bushy_Eyebrows",
+  "Goatee",
+  "Gray_Hair",
+  "Heavy_Makeup",
+  "High_Cheekbones",
+  "Male",
+  "Mouth_Slightly_Open",
+  "Pointy_Nose",
+  "Receding_Hairline",
+  "Rosy_Cheeks",
+  "Sideburns",
+  "Straight_Hair",
+  "Wavy_Hair",
+  "Wearing_Earrings",
+  "Wearing_Hat",
+  "Wearing_Lipstick",
+  "Wearing_Necktie",
+  "Young"
+ ],
+ "cut": [
+  "Blurry",
+  "Chubby",
+  "Double_Chin",
+  "Mustache",
+  "Narrow_Eyes",
+  "Oval_Face",
+  "Pale_Skin",
+  "Wearing_Necklace"
+ ],
+ "note": "Derived from reader_keep.json by inverting the observed/unobserved split for graph B. Eyeglasses and Smiling move OUT of fc_unobs because graph B conditions on them; Male, Young, Beard and Bald move IN because graph B does not. Selection remains the partition-0 F1>=0.55 screen -- the evaluation cohort was not used to choose attributes."
+}
