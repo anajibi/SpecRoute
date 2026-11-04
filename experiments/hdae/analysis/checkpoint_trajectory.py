@@ -15,7 +15,7 @@ from experiments.hdae.data.celeba_hq import CelebAHQPacked
 from experiments.hdae.hdae.attr_utils import to_cond_values
 
 SP = "/tmp/claude-1001/-home-exouser/ee943fc6-c5ef-4405-b557-1b557434dfe9/scratchpad"
-BK = "najibi-research-7f2a"; PFX = "hdae-handoff/celebahq256/k11_cd015r"
+BK = "najibi-research-7f2a"; PFX = "able/celebahq/graph_a/k11_cd015r"
 CKPTS = ["epoch=91-step=34375.ckpt","epoch=99-step=37500.ckpt","epoch=108-step=40625.ckpt",
          "epoch=116-step=43750.ckpt","epoch=124-step=46875.ckpt"]
 TMP = "/home/exouser/SpecRoute/experiments/hdae/outputs/_traj"

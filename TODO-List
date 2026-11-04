@@ -463,7 +463,7 @@ top-k eval, concat/FiLM conditioning, and a real training-data bug.**
   0.431 — a regression, driven by hue's bug-3 corruption above, not a clean read on
   concat_film/FiLM's actual effect). Not a controlled comparison either way even ignoring
   the bug: `k11_v3` also saw 2x the samples of `k11_v2` at the same step count. Full
-  code/checkpoints/dataset mirrored to `s3://najibi-research-7f2a/hdae-handoff/` for
+  code/checkpoints/dataset mirrored to `s3://najibi-research-7f2a/able/` for
   continuation on another server; see `HANDOFF.md` there for the fix-then-retrain plan.
 
 **Fifth pass (2026-08-14, same day): fixed the fourth `to_cond_values` bug instance, then a

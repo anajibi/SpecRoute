@@ -15,7 +15,7 @@ partitioned across `K` taps entering the decoder at different depths instead of 
 injected everywhere. `K` is the experimental variable; everything else is held fixed.
 
 Code: `git@github.com:anajibi/SpecRoute.git`, branch **`celebahq-ladder`**.
-Artifacts: `s3://najibi-research-7f2a/hdae-handoff/`.
+Artifacts: `s3://najibi-research-7f2a/able/`.
 Protocol: `experiments/hdae/configs/LADDER_PROTOCOL.md` — read before training anything.
 
 ---

@@ -1,6 +1,6 @@
 # Rebuilding this project from S3 alone
 
-Everything needed to resume is in `s3://najibi-research-7f2a/hdae-handoff/`. Nothing below requires
+Everything needed to resume is in `s3://najibi-research-7f2a/able/`. Nothing below requires
 access to the original machine. Verified 4 November 2026.
 
 Read `AGENT.md` first for what the project is and where things stand; this file is only the restore
@@ -10,7 +10,7 @@ procedure.
 
 ## 1. Code
 
-    aws s3 cp s3://najibi-research-7f2a/hdae-handoff/code/hdae_repo.bundle .
+    aws s3 cp s3://najibi-research-7f2a/able/code/hdae_repo.bundle .
     git clone hdae_repo.bundle SpecRoute
     cd SpecRoute && git checkout celebahq-ladder
 

@@ -21,7 +21,7 @@ time, and each script encodes the fix for one of them.
     systemd-run --user --scope --unit=hdae-seq --slice=hdae.slice bash ops/sequence_graphB.sh
 
     # integrity of an uploaded checkpoint
-    bash ops/verify_s3.sh najibi-research-7f2a hdae-handoff/celebahq256/<run>/<file>.ckpt
+    bash ops/verify_s3.sh najibi-research-7f2a able/celebahq/assets/<run>/<file>.ckpt
 
 `loginctl enable-linger` must be on, or the systemd scope dies with the login session.
 

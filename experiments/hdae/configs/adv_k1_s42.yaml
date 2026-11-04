@@ -1,7 +1,7 @@
 # ADVERSARIAL TAP INVARIANCE: k=1, seed 42
 #
 # Identical to ladder_k1_s42 except for the adv_tap_* block. That run is the control and is
-# archived at s3://najibi-research-7f2a/hdae-handoff/morpho_ladder/ (tag
+# archived at s3://najibi-research-7f2a/able/morphomnist/ladder/ (tag
 # morpho-ladder-baseline-20260910), so this is a clean one-factor comparison.
 #
 # Why: a linear probe (tap_probe.py) found hue decodable at 97-100% from EVERY k=11 tap,

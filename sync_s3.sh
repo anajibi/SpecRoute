@@ -1,6 +1,6 @@
 #!/bin/bash
 # Sync this machine's work to/from s3://najibi-research-7f2a/wip-from-826a88e/
-# Touches ONLY that prefix. Never writes to hdae-handoff/ or any other prefix.
+# Touches ONLY that prefix. Never writes to able/ or any other prefix.
 set -euo pipefail
 
 AWS=/home/exouser/.local/bin/aws

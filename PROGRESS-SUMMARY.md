@@ -60,7 +60,7 @@
   summed attribute embeddings that gives each attribute a protected slice
   and FiLM-modulates the style vector instead of concatenating into it, plus
   independent per-attribute dropout (`attr_dropout_prob`). Full state
-  mirrored to `s3://najibi-research-7f2a/hdae-handoff/`.
+  mirrored to `s3://najibi-research-7f2a/able/`.
 
 - **Item 3, retrain (2026-08-14 to 2026-08-17).** Deleted the three
   pre-fix checkpoints (`k1_v2`/`k11_v2`/`k11_v3`) and retrained `k11_v3` on

@@ -12,7 +12,7 @@
 # config that produced it -- a checkpoint on its own is not reproducible.
 set -u
 BUCKET=najibi-research-7f2a
-PREFIX=hdae-handoff/morpho_tuning
+PREFIX=able/morphomnist/tuning
 REPO=/home/exouser/SpecRoute
 PY=$REPO/.venv/bin/python
 O=$REPO/experiments/hdae/outputs

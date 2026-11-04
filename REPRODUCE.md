@@ -285,7 +285,7 @@ Headline: depth saturates at five taps. Mean CF1 at each model's own best g is 0
 ## MorphoMNIST conditioning hyperparameter tuning
 
 Branch `wip-from-826a88e`, commit `c580266`.
-Archive: `s3://najibi-research-7f2a/hdae-handoff/morpho_tuning/`
+Archive: `s3://najibi-research-7f2a/able/morphomnist/tuning/`
 
 One prefix per config, each holding `checkpoints/`, `config.yaml`, `sweep_tune_<name>.json`
 and `persample_tune_<name>.npz` — the weights, the exact config that produced them, and the
@@ -325,7 +325,7 @@ descendant, and biases all configs the same direction.
 
 Local checkpoints for `f0`, `f8`, `f32`, `mf100` were pruned after ETag verification;
 `ed256` and `base` are still on disk. Restore any of them with
-`aws s3 cp s3://najibi-research-7f2a/hdae-handoff/morpho_tuning/<name>/checkpoints/last.ckpt .`
+`aws s3 cp s3://najibi-research-7f2a/able/morphomnist/tuning/<name>/checkpoints/last.ckpt .`
 
 ---
 
@@ -333,8 +333,8 @@ Local checkpoints for `f0`, `f8`, `f32`, `mf100` were pruned after ETag verifica
 
 Branch `wip-from-826a88e`, commit `d5270d0`, tag `morpho-adv-20260911`.
 Artifact: https://claude.ai/code/artifact/68ebb277-992a-4f6c-8e88-189f3a59ddd8
-Archive: `s3://najibi-research-7f2a/hdae-handoff/morpho_adv/` (manifest inside)
-Control group: `s3://najibi-research-7f2a/hdae-handoff/morpho_ladder/` (tag `morpho-ladder-baseline-20260910`)
+Archive: `s3://najibi-research-7f2a/able/morphomnist/adv/` (manifest inside)
+Control group: `s3://najibi-research-7f2a/able/morphomnist/ladder/` (tag `morpho-ladder-baseline-20260910`)
 
 A linear probe found `hue` decodable at 97–100% from EVERY tap of the k=5 and k=11 baselines
 (spread 0.0067 and 0.0275) — redundant copies of the source attribute that an intervention never

@@ -5,7 +5,7 @@ sit in the same table as the HDAE results.
 
 ## What's in S3
 
-    s3://najibi-research-7f2a/hdae-handoff/
+    s3://najibi-research-7f2a/able/
 
     data_packed/celebahq_256_pack.tar.gz        5.7 GB  LMDB + attribute npz (30,000 images, 256px)
     celebahq256/readers40_per_attribute.tar.gz  3.7 GB  40 attribute readers (the evaluators)

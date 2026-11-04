@@ -49,13 +49,13 @@ print(torch.load(f,map_location='cpu')['global_step'] if os.path.exists(f) else 
 }
 
 log "########## graph B sequence start"
-stage experiments/hdae/configs/celebahq256_b_k1_p1.yaml  celebahq256_b_k1_p1  31250 hdae-handoff/celebahq256/b_k1_p1  || exit $?
-stage experiments/hdae/configs/celebahq256_b_k1_p2.yaml  celebahq256_b_k1_p2  46875 hdae-handoff/celebahq256/b_k1_p2  || exit $?
+stage experiments/hdae/configs/celebahq256_b_k1_p1.yaml  celebahq256_b_k1_p1  31250 able/celebahq/graph_b/k1_p1  || exit $?
+stage experiments/hdae/configs/celebahq256_b_k1_p2.yaml  celebahq256_b_k1_p2  46875 able/celebahq/graph_b/k1_p2  || exit $?
 # k=1 is complete here; its local checkpoints are verified in s3 by the janitor, free the space
 rm -f $REPO/experiments/hdae/outputs/celebahq256_b_k1_p1/checkpoints/*.ckpt
 log "freed b_k1_p1 local checkpoints, disk $(df -BG --output=avail /home/exouser|tail -1|tr -dc 0-9)GB"
-stage experiments/hdae/configs/celebahq256_b_k11_p1.yaml celebahq256_b_k11_p1 31250 hdae-handoff/celebahq256/b_k11_p1 || exit $?
-stage experiments/hdae/configs/celebahq256_b_k11_p2.yaml celebahq256_b_k11_p2 46875 hdae-handoff/celebahq256/b_k11_p2 || exit $?
+stage experiments/hdae/configs/celebahq256_b_k11_p1.yaml celebahq256_b_k11_p1 31250 able/celebahq/graph_b/k11_p1 || exit $?
+stage experiments/hdae/configs/celebahq256_b_k11_p2.yaml celebahq256_b_k11_p2 46875 able/celebahq/graph_b/k11_p2 || exit $?
 rm -f $REPO/experiments/hdae/outputs/celebahq256_b_k11_p1/checkpoints/*.ckpt
 # free the finished p2 locals as well -- every numbered checkpoint is already ETag-verified in s3
 # by the janitor, and last.ckpt duplicates the final one. Leaving them pinned 2.7 GB each and
