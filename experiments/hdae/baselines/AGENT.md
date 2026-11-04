@@ -30,9 +30,9 @@ A rung trained straight through at the final dropout is **not** comparable and m
 
 | K | final checkpoint | evaluated |
 |---|---|---|
-| 1 | `celebahq256/k1_p2/epoch=124-step=46875.ckpt` | no |
-| 5 | `celebahq256/k5_p2/epoch=124-step=46875.ckpt` | no |
-| 11 | `celebahq256/k11_cd015r/epoch=124-step=46875.ckpt` | **yes** |
+| 1 | `celebahq/graph_a/k1_p2/epoch=124-step=46875.ckpt` | no |
+| 5 | `celebahq/graph_a/k5_p2/epoch=124-step=46875.ckpt` | no |
+| 11 | `celebahq/graph_a/k11_cd015r/epoch=124-step=46875.ckpt` | **yes** |
 
 Phase-1 states are in `k1/`, `k5_p1/`, `k11/` at `step=31250` — intermediate, not for evaluation.
 
@@ -40,25 +40,25 @@ Phase-1 states are in `k1/`, `k5_p1/`, `k11/` at `step=31250` — intermediate, 
 
 | K | final checkpoint | evaluated |
 |---|---|---|
-| 1 | `celebahq256/b_k1_p2/epoch=124-step=46875.ckpt` | no |
-| 11 | `celebahq256/b_k11_p2/epoch=124-step=46875.ckpt` | no |
+| 1 | `celebahq/graph_b/k1_p2/epoch=124-step=46875.ckpt` | no |
+| 11 | `celebahq/graph_b/k11_p2/epoch=124-step=46875.ckpt` | no |
 
 Phase-1 states in `b_k1_p1/`, `b_k11_p1/`. Only K=1 and K=11 were trained for this graph.
 
 ### MorphoMNIST++ · {digit, thickness, intensity, hue}
 
-`morpho_ladder/{k1,k5,k11}_s42/` and `_s43/` — baseline arm, two seeds.
-`morpho_adv/{k1,k5,k11}_s42/` — adversarial arm (per-tap attribute heads with a confusion loss).
-Trained and evaluated. SCM at `morpho_scm.pt`, data at `data_packed/morphomnist_70k.h5`.
+`morphomnist/ladder/{k1,k5,k11}_s42/` and `_s43/` — baseline arm, two seeds.
+`morphomnist/adv/{k1,k5,k11}_s42/` — adversarial arm (per-tap attribute heads with a confusion loss).
+Trained and evaluated. SCM at `morpho_scm.pt`, data at `data/morphomnist_70k.h5`.
 
 ### Causal3DIdent · {class, spotlight position, object position, object rotation}
 
-Trained and evaluated. `c3di/c3di_results_and_analysis.tar.gz` holds the ladder metrics, per-factor
-breakdowns, cohorts and logs; `c3di/attr_predictors_c3di.tar.gz` holds the seven readers.
+Trained and evaluated. `causal3dident/bundles/c3di_results_and_analysis.tar.gz` holds the ladder metrics, per-factor
+breakdowns, cohorts and logs; `causal3dident/bundles/attr_predictors_c3di.tar.gz` holds the seven readers.
 
-**Model weights** live under a different prefix from everything else, which is easy to miss:
+**Model weights** live beside everything else now (they used to sit under a separate prefix):
 
-    wip-from-826a88e/checkpoints/c3di-v2-validated-20260827/
+    able/causal3dident/v2_validated/
       hdae/c3di_k1_final-step217936.ckpt        K=1  final   (2146 MB)
       hdae/k5/c3di_k5_final-step192936.ckpt     K=5  final   (2091 MB)
       hdae/c3di_k11_final-step192936.ckpt       K=11 final   (2085 MB)
@@ -71,8 +71,8 @@ All three finals verified complete; the K=5 file loads at `global_step 192936` w
 tensors and its optimiser state intact. The `c3di-v1-20260825/` sibling holds earlier architecture
 probes (fourier, rmsnorm, both) plus the seven per-factor predictors and the fitted SCMs.
 
-The published ladder results are `wip-from-826a88e/results/c3di-ladder-20260904/`, evaluated from
-these v2 checkpoints, and mirrored at `c3di/c3di_results_and_analysis.tar.gz`.
+The published ladder results are `able/causal3dident/results/`, evaluated from
+these v2 checkpoints, and mirrored at `causal3dident/bundles/c3di_results_and_analysis.tar.gz`.
 
 ---
 
@@ -98,12 +98,12 @@ The reader basis **is** handled — see §4.
 
 | asset | key |
 |---|---|
-| 40 per-attribute readers | `celebahq256/readers40_per_attribute.tar.gz` |
-| graph A reader basis | `celebahq256/reader_keep.json` — 28 FC_unobs |
-| graph B reader basis | `celebahq256/reader_keep_graphB.json` — 30 FC_unobs |
-| cohort, scorer, protocol, reference numbers | `celebahq256/baseline_kit.tar.gz` |
-| pretrained init | `celebahq256/ffhq256_autoenc_model.pt` |
-| packed 256px data | `data_packed/celebahq_256_pack.tar.gz` |
+| 40 per-attribute readers | `celebahq/assets/readers40_per_attribute.tar.gz` |
+| graph A reader basis | `celebahq/assets/reader_keep.json` — 28 FC_unobs |
+| graph B reader basis | `celebahq/assets/reader_keep_graphB.json` — 30 FC_unobs |
+| cohort, scorer, protocol, reference numbers | `celebahq/assets/baseline_kit.tar.gz` |
+| pretrained init | `celebahq/assets/ffhq256_autoenc_model.pt` |
+| packed 256px data | `data/celebahq_256_pack.tar.gz` |
 
 **The observed/unobserved split inverts with the graph, and nothing does this automatically.**
 Eyeglasses and Smiling sit *inside* graph A's 28-attribute FC_unobs set. Scoring graph B against
@@ -189,7 +189,7 @@ after `step=46875` alphabetically, so a missing final checkpoint can look presen
 
 ## 7. Baselines
 
-`celebahq256/BASELINE_HANDOFF.md` has the protocol; `baseline_kit.tar.gz` has the frozen cohort,
+`celebahq/assets/BASELINE_HANDOFF.md` has the protocol; `baseline_kit.tar.gz` has the frozen cohort,
 the model-agnostic scorer and the reference numbers. Baseline runs are on a separate cluster.
 
 **Open question.** If the comparison methods run at lower image resolution than ours, resolution is

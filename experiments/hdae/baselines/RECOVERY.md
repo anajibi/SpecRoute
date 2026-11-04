@@ -35,7 +35,7 @@ separate download.
 
 ## 3. Data
 
-    aws s3 cp s3://.../data_packed/celebahq_256_pack.tar.gz - | tar xz -C experiments/hdae/data/packed/
+    aws s3 cp s3://.../data/celebahq_256_pack.tar.gz - | tar xz -C experiments/hdae/data/packed/
 
 Gives `celebahq_256.lmdb/` (data.mdb, meta.json) and `celebahq_256_attrs.npz`. **Verified**: 41
 columns, 30,000 rows, partitions {0,1,2}, derived `Beard` at column 40 (prevalence 0.1891), with
@@ -46,13 +46,13 @@ re-pack from scratch, CelebA-HQ is public and `experiments/hdae/scripts/pack_cel
 packer. The derived `Beard` column is `-No_Beard` appended as column 40; `.orig40` in the repo
 history is the pre-derivation copy.
 
-MorphoMNIST: `data_packed/morphomnist_70k.h5` and `morphomnist.h5`.
+MorphoMNIST: `data/morphomnist_70k.h5` and `morphomnist.h5`.
 Causal3DIdent raw data: not in S3; public on Zenodo (record 4784282, 250k/25k at 224px).
 The trained C3DI models **are** in S3 — see step 6.
 
 ## 4. Pretrained initialisation
 
-    aws s3 cp s3://.../celebahq256/ffhq256_autoenc_model.pt experiments/hdae/pretrained/
+    aws s3 cp s3://.../celebahq/assets/ffhq256_autoenc_model.pt experiments/hdae/pretrained/
 
 Required by every phase-1 config. 95% of the model transfers from it.
 
@@ -70,41 +70,41 @@ Graph B's SCM does not exist yet — two independent binary marginals, still to 
 
 Final checkpoints, one per rung (see `AGENT.md` §2 for the full table):
 
-    celebahq256/k1_p2/epoch=124-step=46875.ckpt          graph A, K=1
-    celebahq256/k5_p2/epoch=124-step=46875.ckpt          graph A, K=5
-    celebahq256/k11_cd015r/epoch=124-step=46875.ckpt     graph A, K=11  (the evaluated one)
-    celebahq256/b_k1_p2/epoch=124-step=46875.ckpt        graph B, K=1
-    celebahq256/b_k11_p2/epoch=124-step=46875.ckpt       graph B, K=11
-    morpho_ladder/{k1,k5,k11}_s42/, _s43/                MorphoMNIST baseline arm
-    morpho_adv/{k1,k5,k11}_s42/                          MorphoMNIST adversarial arm
+    celebahq/graph_a/k1_p2/epoch=124-step=46875.ckpt          graph A, K=1
+    celebahq/graph_a/k5_p2/epoch=124-step=46875.ckpt          graph A, K=5
+    celebahq/graph_a/k11_cd015r/epoch=124-step=46875.ckpt     graph A, K=11  (the evaluated one)
+    celebahq/graph_b/k1_p2/epoch=124-step=46875.ckpt        graph B, K=1
+    celebahq/graph_b/k11_p2/epoch=124-step=46875.ckpt       graph B, K=11
+    morphomnist/ladder/{k1,k5,k11}_s42/, _s43/                MorphoMNIST baseline arm
+    morphomnist/adv/{k1,k5,k11}_s42/                          MorphoMNIST adversarial arm
 
 Each CelebA directory also holds that stage's config, `logs/`, and the intermediate checkpoints.
 
-Causal3DIdent models are under a **different prefix**:
+Causal3DIdent models are at:
 
-    wip-from-826a88e/checkpoints/c3di-v2-validated-20260827/hdae/c3di_k1_final-step217936.ckpt
-    wip-from-826a88e/checkpoints/c3di-v2-validated-20260827/hdae/k5/c3di_k5_final-step192936.ckpt
-    wip-from-826a88e/checkpoints/c3di-v2-validated-20260827/hdae/c3di_k11_final-step192936.ckpt
+    able/causal3dident/v2_validated/hdae/c3di_k1_final-step217936.ckpt
+    able/causal3dident/v2_validated/hdae/k5/c3di_k5_final-step192936.ckpt
+    able/causal3dident/v2_validated/hdae/c3di_k11_final-step192936.ckpt
 
 Verify any checkpoint after download with `experiments/hdae/ops/verify_s3.sh`; size equality is not
 proof of a complete upload.
 
 ## 7. Evaluation assets
 
-    celebahq256/readers40_per_attribute.tar.gz    the 40 per-attribute readers
-    celebahq256/reader_keep.json                  graph A basis, 28 FC_unobs
-    celebahq256/reader_keep_graphB.json           graph B basis, 30 FC_unobs
-    celebahq256/baseline_kit.tar.gz               cohort_2048.json, scorer, protocol, reference numbers
+    celebahq/assets/readers40_per_attribute.tar.gz    the 40 per-attribute readers
+    celebahq/assets/reader_keep.json                  graph A basis, 28 FC_unobs
+    celebahq/assets/reader_keep_graphB.json           graph B basis, 30 FC_unobs
+    celebahq/assets/baseline_kit.tar.gz               cohort_2048.json, scorer, protocol, reference numbers
     attr_predictors_70k.tar.gz                    MorphoMNIST readers
-    c3di/attr_predictors_c3di.tar.gz              Causal3DIdent readers
+    causal3dident/bundles/attr_predictors_c3di.tar.gz              Causal3DIdent readers
 
 `cohort_2048.json` is graph A's cohort (all-male, Bald flipped). **There is no graph-B cohort** —
 it still has to be defined.
 
 ## 8. Results
 
-`celebahq256/results/` and `results/` hold the metric JSONs; `c3di/c3di_results_and_analysis.tar.gz`
-holds the Causal3DIdent ladder; `morpho_ladder/sweeps/` and `morpho_adv/analysis/` the MorphoMNIST
+`celebahq/results/` and `results/` hold the metric JSONs; `causal3dident/bundles/c3di_results_and_analysis.tar.gz`
+holds the Causal3DIdent ladder; `morphomnist/ladder/sweeps/` and `morphomnist/adv/analysis/` the MorphoMNIST
 sweeps.
 
 ## 9. Running
