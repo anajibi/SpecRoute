@@ -47,7 +47,8 @@ packer. The derived `Beard` column is `-No_Beard` appended as column 40; `.orig4
 history is the pre-derivation copy.
 
 MorphoMNIST: `data_packed/morphomnist_70k.h5` and `morphomnist.h5`.
-Causal3DIdent: not in S3. It is public on Zenodo (record 4784282, 250k/25k at 224px).
+Causal3DIdent raw data: not in S3; public on Zenodo (record 4784282, 250k/25k at 224px).
+The trained C3DI models **are** in S3 — see step 6.
 
 ## 4. Pretrained initialisation
 
@@ -79,7 +80,11 @@ Final checkpoints, one per rung (see `AGENT.md` §2 for the full table):
 
 Each CelebA directory also holds that stage's config, `logs/`, and the intermediate checkpoints.
 
-**Causal3DIdent model weights do not exist** — see `AGENT.md` §2. Only results and readers survive.
+Causal3DIdent models are under a **different prefix**:
+
+    wip-from-826a88e/checkpoints/c3di-v2-validated-20260827/hdae/c3di_k1_final-step217936.ckpt
+    wip-from-826a88e/checkpoints/c3di-v2-validated-20260827/hdae/k5/c3di_k5_final-step192936.ckpt
+    wip-from-826a88e/checkpoints/c3di-v2-validated-20260827/hdae/c3di_k11_final-step192936.ckpt
 
 Verify any checkpoint after download with `experiments/hdae/ops/verify_s3.sh`; size equality is not
 proof of a complete upload.
@@ -114,6 +119,5 @@ a failure — the `init_from`-on-converged-weights NaN in particular.
 |---|---|
 | CelebA-HQ source JPEGs (2.7 GB) | public dataset; the packed LMDB is the training input |
 | Causal3DIdent raw data (13 GB) | public on Zenodo |
-| Causal3DIdent model weights | lost before any backup existed; not recoverable |
 | local venv | rebuilt from `pip_freeze_exact.txt` |
 | per-run one-off shell scripts | superseded by `ops/supervise.sh` and `ops/watch.sh` |

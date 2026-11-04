@@ -56,11 +56,23 @@ Trained and evaluated. SCM at `morpho_scm.pt`, data at `data_packed/morphomnist_
 Trained and evaluated. `c3di/c3di_results_and_analysis.tar.gz` holds the ladder metrics, per-factor
 breakdowns, cohorts and logs; `c3di/attr_predictors_c3di.tar.gz` holds the seven readers.
 
-> **The C3DI model weights no longer exist.** Confirmed by a full-filesystem search: the output
-> directories retain only tensorboard events and `hparams.yaml`, nothing was ever uploaded, and no
-> `.ckpt` survives locally. The metrics are safe but those models cannot be re-sampled or re-scored
-> without retraining from `configs/c3di_hier_k{1,5,11}_final.yaml`. This blocks adding any new
-> metric to C3DI.
+**Model weights** live under a different prefix from everything else, which is easy to miss:
+
+    wip-from-826a88e/checkpoints/c3di-v2-validated-20260827/
+      hdae/c3di_k1_final-step217936.ckpt        K=1  final   (2146 MB)
+      hdae/k5/c3di_k5_final-step192936.ckpt     K=5  final   (2091 MB)
+      hdae/c3di_k11_final-step192936.ckpt       K=11 final   (2085 MB)
+      hdae/intermediates/                        K=1 and K=11 intermediates
+      hdae/k5/c3di_k5_final-epoch=*.ckpt         K=5 intermediates
+      configs/c3di_hier_k{1,5,11}_final.yaml
+      results/                                   the n=256 sweeps
+
+All three finals verified complete; the K=5 file loads at `global_step 192936` with no non-finite
+tensors and its optimiser state intact. The `c3di-v1-20260825/` sibling holds earlier architecture
+probes (fourier, rmsnorm, both) plus the seven per-factor predictors and the fitted SCMs.
+
+The published ladder results are `wip-from-826a88e/results/c3di-ladder-20260904/`, evaluated from
+these v2 checkpoints, and mirrored at `c3di/c3di_results_and_analysis.tar.gz`.
 
 ---
 
