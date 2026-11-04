@@ -1,169 +1,196 @@
-# Agent brief — baseline counterfactual models on CelebA-HQ 256
+# HDAE — state of the project and where everything lives
 
-You are picking up a research thread. Your job: **train baseline counterfactual models from the
-literature and report CC / FC_obs / FC_unobs / CF1 for them**, so they can sit in one table beside
-the HDAE results already produced.
+Last updated 4 November 2026. Supersedes the 6 October version, which predates the second causal
+graph, the training protocol and most of the models.
 
-Everything you need is in `s3://najibi-research-7f2a/hdae-handoff/`. You do not need the machine
-this was run on, and you do not need to reproduce HDAE.
+Read this first, then `MANIFEST.md` at the S3 prefix root for the file-by-file inventory.
 
 ---
 
-## 1. What this project measures
+## 1. What the project is
 
-A counterfactual edit flips one attribute of a face and should leave everything else alone.
+A hierarchical diffusion autoencoder for counterfactual image generation. A diffusion autoencoder
+conditioned on a structural causal model over named attributes, where the semantic latent is
+partitioned across `K` taps entering the decoder at different depths instead of one global code
+injected everywhere. `K` is the experimental variable; everything else is held fixed.
 
-    CC        did the requested edit land  (target reader returns the flipped value)
-    FC_obs    did the other CONDITIONED attributes stay put
-    FC_unobs  did the 28 UNCONDITIONED attributes stay put
-    CF1       harmonic mean of CC with the corresponding FC
-
-Conditioned attributes: **Male, Young, Beard, Bald**. Everything else is unconditioned.
-
----
-
-## 2. Get set up
-
-```bash
-A=s3://najibi-research-7f2a/hdae-handoff
-aws s3 cp $A/data_packed/celebahq_256_pack.tar.gz .   # 4 GB  -> celebahq_256.lmdb + attrs npz
-aws s3 cp $A/celebahq256/readers40_per_attribute.tar.gz .  # 3.7 GB -> single/<attr>.pt x40
-#   NOTE: ignore attr_predictors_celebahq256.tar.gz in the same prefix. That is an older
-#   shared-backbone set, superseded by the 40 per-attribute readers above.
-aws s3 cp $A/celebahq256/baseline_kit.tar.gz .        # scorer, cohort, keep list, reference
-aws s3 cp $A/celebahq256/ffhq256_autoenc_model.pt .   # 1.3 GB, for a DiffAE-family baseline
-```
-
-**Code comes from git, not S3:**
-
-```bash
-git clone git@github.com:anajibi/SpecRoute.git
-cd SpecRoute && git checkout celebahq-ladder      # commit 4f712b3 or later
-```
-
-Everything you need is on that branch: `experiments/hdae/baselines/` (this kit),
-`experiments/hdae/scripts/*celebahq*.py` (the evaluation code), `experiments/hdae/configs/`,
-and `diffae_upstream/`. S3 holds only data, weights and results.
-
-Python env: torch + torchvision (ConvNeXt), lmdb, numpy, PIL. The readers are
-torchvision `convnext_small` with a 1-unit head, fp16 weights, 256px input.
+Code: `git@github.com:anajibi/SpecRoute.git`, branch **`celebahq-ladder`**.
+Artifacts: `s3://najibi-research-7f2a/hdae-handoff/`.
+Protocol: `experiments/hdae/configs/LADDER_PROTOCOL.md` — read before training anything.
 
 ---
 
-## 3. The evaluation contract
+## 2. Models — all trained, all archived
 
-Your baseline does **not** have to be diffusion-based, share our sampler, or expose a guidance
-scale. It writes PNGs; the shared scorer reads them.
+Eleven models. Every CelebA-HQ rung ran the same two phases: 31,250 steps at
+`cfg_drop 0.10 / attr_drop 0.08` from the ffhq256 transfer, then resumed to 46,875 at `0.15 / 0.12`.
+A rung trained straight through at the final dropout is **not** comparable and must not be mixed in.
 
-```
-<root>/recon/<index>.png                reconstruction of the cohort image, NO edit
-<root>/<attr>/<strength>/<index>.png    counterfactual with <attr> flipped
-```
+### CelebA-HQ 256 — graph A · {Male, Young, Beard, Bald}
 
-`<index>` is zero-padded to 5 digits, from `cohort_2048.json`.
-`<attr>` ∈ {Male, Young, Beard, Bald}.
-`<strength>` is a free label — `g3.0` for guidance, `alpha2.5` for a GAN edit magnitude, `fixed`
-for a single deterministic counterfactual. The scorer treats it as opaque.
+| K | final checkpoint | evaluated |
+|---|---|---|
+| 1 | `celebahq256/k1_p2/epoch=124-step=46875.ckpt` | no |
+| 5 | `celebahq256/k5_p2/epoch=124-step=46875.ckpt` | no |
+| 11 | `celebahq256/k11_cd015r/epoch=124-step=46875.ckpt` | **yes** |
 
-```bash
-python score_counterfactuals.py --root <root> --readers <dir of .pt> --out results.json
-```
+Phase-1 states are in `k1/`, `k5_p1/`, `k11/` at `step=31250` — intermediate, not for evaluation.
 
-The scorer resolves `cohort_2048.json` and `reader_keep.json` next to itself, so it runs from the
-unpacked kit anywhere on disk; you do not need a repo checkout to score.
+### CelebA-HQ 256 — graph B · {Eyeglasses, Smiling}, independent
 
-**Sweep the strength parameter.** Our data shows the optimum varies 3x across attributes of the
-same model (Beard best at 2, Bald at 6). A single fixed strength handicaps some attributes badly.
+| K | final checkpoint | evaluated |
+|---|---|---|
+| 1 | `celebahq256/b_k1_p2/epoch=124-step=46875.ckpt` | no |
+| 11 | `celebahq256/b_k11_p2/epoch=124-step=46875.ckpt` | no |
 
----
+Phase-1 states in `b_k1_p1/`, `b_k11_p1/`. Only K=1 and K=11 were trained for this graph.
 
-## 4. Rules that are not negotiable
+### MorphoMNIST++ · {digit, thickness, intensity, hue}
 
-**FC is measured against the model's own reconstruction, not the source photograph.** Against the
-photo you also charge the model for its encode/decode error, which has nothing to do with the
-intervention. A model with no reconstruction path can pass `--recon-is-source`, but that is a
-different, stricter measurement and must not share a column with reconstruction-based FC.
+`morpho_ladder/{k1,k5,k11}_s42/` and `_s43/` — baseline arm, two seeds.
+`morpho_adv/{k1,k5,k11}_s42/` — adversarial arm (per-tap attribute heads with a confusion loss).
+Trained and evaluated. SCM at `morpho_scm.pt`, data at `data_packed/morphomnist_70k.h5`.
 
-**Read the cohort indices from the file. Do not re-derive them.** The draw depends on a seed *and*
-on the partition/attribute arrays; regenerating it can silently give different subjects.
+### Causal3DIdent · {class, spotlight position, object position, object rotation}
 
-**Reader selection must happen on data disjoint from your evaluation cohort.** Tuning and
-threshold fitting on the cohort is fine. Choosing *which attributes to keep* on cohort numbers is
-selection on the test set. We cut 8 readers at F1 < 0.55 measured on a partition-0 slice that
-never enters the cohort — see `selection_metrics.json`.
+Trained and evaluated. `c3di/c3di_results_and_analysis.tar.gz` holds the ladder metrics, per-factor
+breakdowns, cohorts and logs; `c3di/attr_predictors_c3di.tar.gz` holds the seven readers.
 
-**Readers run untuned (`logit > 0`)** except the attribute being intervened on, which uses an
-F1-optimal threshold. CC counts positive readings, so a permissive reader inflates it: our Bald
-reader at the balanced-accuracy threshold predicted bald at 13% against a 6% base rate.
+> **The C3DI model weights no longer exist.** Confirmed by a full-filesystem search: the output
+> directories retain only tensorboard events and `hparams.yaml`, nothing was ever uploaded, and no
+> `.ckpt` survives locally. The metrics are safe but those models cannot be re-sampled or re-scored
+> without retraining from `configs/c3di_hier_k{1,5,11}_final.yaml`. This blocks adding any new
+> metric to C3DI.
 
 ---
 
-## 5. Mistakes made here, so you can skip them
+## 3. Where things stand
 
-**A domain gap that did not exist.** Reported for days that the readers lose ~5 points on generated
-images, and built two rounds of augmentation around fixing it. It came from comparing the
-mixed-sex test split against the all-male cohort — a cohort shift. Measured on the *same* subjects,
-source vs reconstruction is 0.8473 vs 0.8462, gap −0.001, 0 of 35 attributes losing >5 points.
-**Always compare the same subjects.**
+Trained but **not evaluated**: graph A K=1 and K=5, graph B K=1 and K=11.
 
-**Selecting readers on cohort numbers.** Wearing_Lipstick scores F1 0.367 on the all-male cohort
-and 0.950 on a clean slice — it has 22 positives among 2,048 men. Cutting on cohort numbers
-discards good instruments.
+Graph B cannot be evaluated yet. Two items are outstanding:
 
-**A saturated reader hides drift.** Our Blurry reader had balanced accuracy 0.760 and F1 0.033 —
-it fired on 25% of images at a 0.4% base rate, so it never changed between reconstruction and
-counterfactual and reported FC ≈ 1.0. Balanced accuracy does not catch this; compare prediction
-rate against base rate.
+1. **No fitted SCM.** `configs/causal_graph_celebahq_b.yaml` declares
+   `scm_checkpoint: experiments/hdae/outputs/scm/celebahq_b_scm.pt`, which does not exist. It is two
+   independent binary marginals, so it is minutes of CPU and no GPU. Training did not need it
+   (image logging is off); evaluation does.
+2. **No cohort.** `cohort_2048.json` in `baseline_kit.tar.gz` is all-male with Bald flipped — built
+   for graph A and wrong for an Eyeglasses/Smiling study. Graph B needs its own frozen cohort and
+   the selection rule is a research decision, not a default.
 
-**FC has a floor.** Running the pipeline with `do(A = its existing value)` gives FC of 0.92–0.96,
-not 1.0 — guidance perturbs the image anyway and readers disagree with themselves on near-identical
-images. Normalise as `FC / floor`, **not** `(FC − floor)/(1 − floor)`; the floor is a ceiling on
-achievable preservation, not a baseline to subtract. Run this control for your baseline.
-
-**`Male` inflates FC_obs** on an all-male cohort: it reads "preserved" for every subject.
-
-**Size equality is not proof of a complete upload.** A `tar` that hits a full disk uploads and
-"verifies" perfectly. Read archives back and count members.
+The reader basis **is** handled — see §4.
 
 ---
 
-## 6. HDAE reference numbers
+## 4. Evaluation assets, and the one thing that inverts between graphs
 
-From `reference_hdae.json`. Target-only nulling, 2,048 held-out males, T=50 DDIM, FC_unobs over
-28 readers.
+| asset | key |
+|---|---|
+| 40 per-attribute readers | `celebahq256/readers40_per_attribute.tar.gz` |
+| graph A reader basis | `celebahq256/reader_keep.json` — 28 FC_unobs |
+| graph B reader basis | `celebahq256/reader_keep_graphB.json` — 30 FC_unobs |
+| cohort, scorer, protocol, reference numbers | `celebahq256/baseline_kit.tar.gz` |
+| pretrained init | `celebahq256/ffhq256_autoenc_model.pt` |
+| packed 256px data | `data_packed/celebahq_256_pack.tar.gz` |
 
-| attribute | best g | CC | FC_obs | FC_unobs | CF1 |
-|---|---|---|---|---|---|
-| Beard | 2 | 0.9458 | 0.9207 | 0.8161 | 0.8788 |
-| Male  | 5 | 0.9194 | 0.7686 | 0.7445 | 0.8220 |
-| Young | 5 | 0.8379 | 0.8406 | 0.7515 | 0.7920 |
-| Bald  | 6 | 0.8662 | 0.7601 | 0.7117 | 0.7832 |
+**The observed/unobserved split inverts with the graph, and nothing does this automatically.**
+Eyeglasses and Smiling sit *inside* graph A's 28-attribute FC_unobs set. Scoring graph B against
+`reader_keep.json` would count the intervened attributes as collateral damage, so a successful edit
+would be penalised as unobserved drift — a bad score precisely when the model works. Use
+`reader_keep_graphB.json` for graph B: Eyeglasses and Smiling move out, Male/Young/Beard/Bald move
+in (all four clear the F1 ≥ 0.55 screen).
 
-For a diffusion baseline using classifier-free guidance, the **null set** matters as much as the
-scale. Nulling only the edited attribute beat nulling all four everywhere we tested
-(ΔCF1: Beard −0.008, Bald −0.025, Young −0.065, Male −0.116). Record which convention you use;
-results are not comparable across conventions.
-
----
-
-## 7. What to deliver
-
-1. `results.json` per baseline from `score_counterfactuals.py`, strength swept per attribute.
-2. The null-intervention control for each baseline (`do(A = existing value)`), so FC is normalisable.
-3. A note on which null-set / edit convention each baseline used.
-4. Reader accuracy on your own reconstructions if you want a per-model instrument check — ground
-   truth is in the npz. Our measurement says this is not needed, but it is cheap.
-
-Upload to `s3://najibi-research-7f2a/hdae-handoff/baselines/<model_name>/`.
+Attribute **selection** was made on the partition-0 slice, never on the evaluation cohort.
+Threshold fitting and tuning on the cohort is fine; selection on it is not, or the surviving readers
+are the ones that happen to look good on the evaluation set.
 
 ---
 
-## 8. Open questions in this thread
+## 5. Metric definitions, and a caveat
 
-- The null-intervention control predates per-attribute FC storage, so its floor is computed over an
-  earlier 22-reader set rather than the current 28. Re-run it if you need them on one basis.
-- `Young`'s optimal guidance moved from 3 to 5 when the reader set changed; its CF1 curve is nearly
-  flat, so treat that one as weakly determined.
-- The person running this thread flagged the CF1 definition as wrong. The formula used is the
-  harmonic mean of CC and FC, matching `aggregate_metrics.py`. The objection was never resolved —
-  ask before relying on CF1 rankings.
+- **CC** — the intervened attribute now reads as its target value.
+- **FC_obs** — among conditioned attributes, non-descendants of the target are unchanged.
+  Descendants are expected to move and are excluded, not penalised.
+- **FC_unobs** — the same test over attributes outside the graph, where any movement is pure
+  collateral damage. The stricter and more informative of the two.
+- **CF1** — computed **per intervention and then averaged**, not on pooled rates:
+  `CF1_a = 2·CC_a·FC_a/(CC_a+FC_a)`, then `CF1 = mean_a CF1_a`. The two differ, and the pooled form
+  lets a frequent intervention dominate a rare one.
+- **Composition / FC floor** — intervene on an attribute to the value it already has. Preservation
+  under that null intervention is **not** 1.0, so preservation is reported as a ratio to that
+  measured ceiling, never as a difference from one.
+- Guidance is swept **per attribute**; the optimum is not shared across attributes.
+- Null set is **target-only** — only the intervened attribute is masked in the unconditional branch.
+  It beat all-four nulling at every attribute tested.
+
+> **CF1 is not comparable across datasets yet.** The three pipelines combine CC with different
+> preservation terms: MorphoMNIST uses all measured attributes, Causal3DIdent reports separate
+> conditioned and unconditioned variants, CelebA-HQ uses the unconditioned set. Within a dataset the
+> comparison across `K` is sound. Unify the definition before any cross-dataset claim.
+
+---
+
+## 6. How to run training
+
+Scripts in `experiments/hdae/ops/`, documented in `ops/README.md`.
+
+    systemd-run --user --scope --unit=hdae-<run> --slice=hdae.slice \
+      bash experiments/hdae/ops/supervise.sh <config> <run-name> <target-step> <s3-prefix>
+
+`loginctl enable-linger` must be on. Run one job at a time: five concurrent jobs measured 0.88× the
+throughput of running them sequentially.
+
+### Four rules, each from a failure that cost time
+
+**Never use `init_from` to continue converged weights.** It loads weights only, so Adam restarts
+with zero second moments and takes sign-like ±lr steps regardless of gradient magnitude. On a
+converged model that goes non-finite at optimiser step **423**, reproduced twice. Use `resume_from`,
+which restores weights, Adam moments, the GradScaler and `global_step`. `init_from` is safe only
+from the pretrained DiffAE checkpoint.
+
+**`max_steps` is absolute on a resume.** Phase 2 is `46875`, not `15625`; the latter exits
+immediately.
+
+**`accum_batches` must be in the config, not only on the Trainer.** `conf.accum_batches` gates the
+EMA update, and setting one side alone advances the EMA 8× too fast and silently corrupts every
+evaluation.
+
+**A non-finite gradient is normal; a non-finite parameter is not.** The AMP scaler legitimately
+skips a handful of steps per run. The NaN tracer (`HDAE_NAN_TRACE`, `HDAE_NAN_TRACE_ABORT=1`) aborts
+only on a non-finite **parameter** — aborting on gradients would kill healthy runs.
+
+### Storage
+
+Checkpoints are ~2.8 GB and the disk holds ~10 GB free. Run `ckpt_janitor.sh <dir> <s3prefix> 0`
+alongside: it ships each checkpoint, recomputes the multipart ETag locally to verify, then deletes
+the local copy. Kill stale janitors when a run ends — one left watching a finished directory with
+`KEEP=0` deleted a restored checkpoint twice.
+
+**Size equality is not proof of a complete upload.** A truncated file ETag-verifies perfectly; the
+ETag proves the transfer was faithful, not that the file was whole. Use `ops/verify_s3.sh`, which
+reads the tail back from S3 and checks for the zip end-of-central-directory record.
+
+When listing S3 to check completeness, **sort by step number, not by name** — `step=37500` sorts
+after `step=46875` alphabetically, so a missing final checkpoint can look present.
+
+---
+
+## 7. Baselines
+
+`celebahq256/BASELINE_HANDOFF.md` has the protocol; `baseline_kit.tar.gz` has the frozen cohort,
+the model-agnostic scorer and the reference numbers. Baseline runs are on a separate cluster.
+
+**Open question.** If the comparison methods run at lower image resolution than ours, resolution is
+confounded with model quality and the numbers are not directly comparable. Either match resolutions
+for a common-resolution comparison (which needs readers retrained at that resolution, since many
+fine-detail attributes degrade badly) or report each at its native resolution with the limitation
+stated. A compute estimate for each option exists.
+
+---
+
+## 8. Current blocker
+
+The box rebooted on 4 November into kernel `7.0.0-30-generic` and the **NVIDIA kernel module did not
+load** — `nvidia-smi` cannot reach the driver and `torch.cuda.is_available()` is False. The A100 is
+on the PCI bus and DKMS has a module built for this kernel, so it looks like a load rather than a
+reinstall: `sudo modprobe nvidia`. Nothing can train or evaluate until that is back.
