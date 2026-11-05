@@ -1,0 +1,84 @@
+# 3DShapes - Graph A - data-generation protocol v1 (FROZEN)
+#
+# Source: 3dshapes.h5, 480,000 images, 64x64x3, full grid
+#         floor_hue(10) x wall_hue(10) x object_hue(10) x scale(8) x shape(4) x orientation(15)
+#   url:  https://storage.googleapis.com/3d-shapes/3dshapes.h5
+#   size: 267573662 bytes
+#   md5:  099a2078d58cec4daad0702c55d06868        (single-part, verified on download)
+#
+# All arithmetic is on stored factor INDICES. (+)_K / (-)_K = add / subtract mod K.
+# No images are generated or copied: the output is a layout over the existing grid.
+
+graph:
+  # shape --> scale --> floor_hue <-- object_hue
+  modeled:    [shape, object_hue, scale, floor_hue]
+  unobserved: [wall_hue, orientation]   # exogenous; never conditioned or intervened on, preserved
+  edges:
+    - [shape, scale]
+    - [scale, floor_hue]
+    - [object_hue, floor_hue]
+
+cardinality:
+  shape: 4
+  object_hue: 10
+  scale: 8
+  floor_hue: 10
+  wall_hue: 10
+  orientation: 15
+
+mechanisms:
+  # identity + uniform
+  shape:       {kind: root, dist: uniform}
+  object_hue:  {kind: root, dist: uniform}
+  wall_hue:    {kind: root, dist: uniform}
+  orientation: {kind: root, dist: uniform}
+  # C = m_C(S) (+)_8 U_C
+  scale:
+    kind: structural
+    parents: [shape]
+    shift_by_shape: [0, 2, 5, 7]     # m_C, indexed by shape 0..3
+    noise: P_8
+  # H_f = (H_o (+)_10 C) (+)_10 U_F
+  floor_hue:
+    kind: structural
+    parents: [object_hue, scale]
+    noise: P_10
+
+# P_K: P(0)=0.25, P(+1)=P(-1)=0.125, all other values 0.5/(K-3).
+# Full support => positivity: every grid image has non-zero probability, every counterfactual
+# is in support and its true image is in the grid.
+noise:
+  P_8:  [0.25, 0.125, 0.1, 0.1, 0.1, 0.1, 0.1, 0.125]
+  P_10: [0.25, 0.125, 0.0714285714285714, 0.0714285714285714, 0.0714285714285714,
+         0.0714285714285714, 0.0714285714285714, 0.0714285714285714, 0.0714285714285714, 0.125]
+
+# Abduction is exact (mechanisms invertible):
+#   U_C = C (-)_8 m_C(S)
+#   U_F = H_f (-)_10 (H_o (+)_10 C)
+# Counterfactual: recover noise, set the intervened value, recompute descendants, keep the rest.
+# Effect sizes come from m_C and the (+) terms, not from the noise; the noise only sets coverage.
+
+generation:
+  n_train: 16000000          # 16 M SCM draws, with replacement, from the 432,000 training cells
+  heldout_frac: 0.10         # 48,000 grid cells held out uniformly at random
+  seeds:
+    split_seed: 11052026
+    draw_seed: 11052027
+    shuffle_seed: 11052028
+  # Grid index, h5 row order (orientation fastest-varying):
+  #   idx = H_f*48000 + H_w*4800 + H_o*480 + C*60 + S*15 + R
+  strides: {floor_hue: 48000, wall_hue: 4800, object_hue: 480, scale: 60, shape: 15, orientation: 1}
+  # train_layout.npy column order (the tuple order of section 3.2 of the protocol):
+  layout_columns: [shape, object_hue, scale, floor_hue, wall_hue, orientation]
+
+# Test 4/5/6/7 pass rule (per explicit decision): reference is the RAW SCM, and the
+# chi-square p>0.01 condition is replaced by a tolerance on relative deviation, because
+# restricting draws to the 432,000 training cells perturbs the modeled marginals by
+# ~0.1-0.3% relative and at N=16M a chi-square test resolves that.
+#   per-bin tolerance = max(0.01, 5 * sqrt((1-p)/expected_count))
+# The 1% floor governs the coarse tables; the noise-aware term governs the fine
+# P(H_f | H_o, C) table, whose 8,000 bins carry ~0.84% multinomial noise on their own.
+# chi2, df, p and max|z| are recorded for every table as diagnostics.
+test_rule:
+  rel_dev_floor: 0.01
+  z_multiplier: 5

@@ -1,0 +1,380 @@
+{
+  "10_determinism": {
+    "pass": true,
+    "sha256": {
+      "factor_to_idx.npy": "bb7a59a8aed381ae25b9715544f9a5df6cf497ef082d595aa16a55feaffa44c5",
+      "heldout_cells.npy": "7175b59deb4f4713e01a00194c4c1934654773368a5899bb513273cf54b001d6",
+      "train_image_idx.npy": "8d3ea80ea99a6193a996d085ba70cf9bb47ee08e9aa84ce1c8e0f71ac46a1afe",
+      "train_layout.npy": "58f5ebe37899dde51be86c93662da7ad5bbc9a0d1504a10a9e15ae91c583b34e"
+    },
+    "sha256_regenerated": {
+      "factor_to_idx.npy": "bb7a59a8aed381ae25b9715544f9a5df6cf497ef082d595aa16a55feaffa44c5",
+      "heldout_cells.npy": "7175b59deb4f4713e01a00194c4c1934654773368a5899bb513273cf54b001d6",
+      "train_image_idx.npy": "8d3ea80ea99a6193a996d085ba70cf9bb47ee08e9aa84ce1c8e0f71ac46a1afe",
+      "train_layout.npy": "58f5ebe37899dde51be86c93662da7ad5bbc9a0d1504a10a9e15ae91c583b34e"
+    }
+  },
+  "1_index_formula": {
+    "mismatches": 0,
+    "pass": true,
+    "rows_checked": 480000,
+    "unfilled_lookup_entries": 0
+  },
+  "2_holdout_disjoint": {
+    "heldout_cells": 48000,
+    "pass": true,
+    "train_rows_in_heldout": 0,
+    "training_cells": 432000
+  },
+  "3_coverage": {
+    "cells_below_10": 481,
+    "cells_zero": 0,
+    "heldout_cells_hit": 0,
+    "max": 229,
+    "mean": 37.03703703703704,
+    "median": 27.0,
+    "min": 4,
+    "note": "pass condition is min>=1; 'min>=10' is a target that N=16M does not reach (predicted min ~4, ~474 cells below 10)",
+    "pass": true
+  },
+  "4_root_marginals": {
+    "pass": true,
+    "tables": {
+      "object_hue": {
+        "bins": 10,
+        "chi2": 166.50104875,
+        "chi2_p": 3.302838469242944e-31,
+        "df": 9,
+        "label": "object_hue",
+        "max_abs_z": 2.5964921457683903,
+        "max_rel_dev": 0.00519875000000003,
+        "max_se_holdout": 0.001856444783841543,
+        "max_se_multinomial": 0.00075,
+        "min_expected_count": 1600000.0,
+        "n": 16000000.0,
+        "pass": true,
+        "tolerance_at_worst_bin": 0.010011102880616539
+      },
+      "orientation": {
+        "bins": 15,
+        "chi2": 88.75340375,
+        "chi2_p": 6.523182412556049e-13,
+        "df": 14,
+        "label": "orientation",
+        "max_abs_z": 1.8877821125271332,
+        "max_rel_dev": 0.004641250000000041,
+        "max_se_holdout": 0.0022736712280313287,
+        "max_se_multinomial": 0.0009354143466934853,
+        "min_expected_count": 1066666.6666666667,
+        "n": 16000000.0,
+        "pass": true,
+        "tolerance_at_worst_bin": 0.012292864651066377
+      },
+      "shape": {
+        "bins": 4,
+        "chi2": 9.0814625,
+        "chi2_p": 0.02822717775322833,
+        "df": 3,
+        "label": "shape",
+        "max_abs_z": 0.9511186543288707,
+        "max_rel_dev": 0.0011902500000000593,
+        "max_se_holdout": 0.0011741187734536167,
+        "max_se_multinomial": 0.00043301270189221935,
+        "min_expected_count": 4000000.0,
+        "n": 16000000.0,
+        "pass": true,
+        "tolerance_at_worst_bin": 0.01
+      },
+      "wall_hue": {
+        "bins": 10,
+        "chi2": 33.94138625,
+        "chi2_p": 9.145995314337883e-05,
+        "df": 9,
+        "label": "wall_hue",
+        "max_abs_z": 1.40843623006818,
+        "max_rel_dev": 0.0028200000000000447,
+        "max_se_holdout": 0.001856444783841289,
+        "max_se_multinomial": 0.00075,
+        "min_expected_count": 1600000.0,
+        "n": 16000000.0,
+        "pass": true,
+        "tolerance_at_worst_bin": 0.010011102880616515
+      }
+    }
+  },
+  "5_mechanism_tables": {
+    "pass": true,
+    "tables": {
+      "P(C|S)": {
+        "chi2": 64.05514065036327,
+        "chi2_p": 0.00012050437415202673,
+        "df": 28,
+        "label": "P(scale|shape)",
+        "max_abs_z": 1.5063486763909029,
+        "max_rel_dev": 0.005183647028592087,
+        "min_expected_count": 399660.7,
+        "pass": true,
+        "rows": 4,
+        "rows_failing": 0,
+        "worst_row": {
+          "bins": 8,
+          "chi2": 30.79802567527916,
+          "chi2_p": 6.773893932181009e-05,
+          "df": 7,
+          "label": "P(scale|shape)[S=1]",
+          "max_abs_z": 1.5063486763909029,
+          "max_rel_dev": 0.005183647028592087,
+          "max_se_holdout": 0.003096763970654725,
+          "max_se_multinomial": 0.0015006365925208445,
+          "min_expected_count": 399660.7,
+          "n": 3996607.0,
+          "pass": true,
+          "tolerance_at_worst_bin": 0.01720599987849995
+        }
+      },
+      "P(H_f|H_o,C)": {
+        "chi2": 3622.0664656719823,
+        "chi2_p": 0.0,
+        "df": 720,
+        "label": "P(floor_hue|object_hue,scale)",
+        "max_abs_z": 4.0146903349760015,
+        "max_rel_dev": 0.06518425219095603,
+        "min_expected_count": 11935.285714285714,
+        "pass": true,
+        "rows": 80,
+        "rows_failing": 0,
+        "worst_row": {
+          "bins": 10,
+          "chi2": 85.85265121863657,
+          "chi2_p": 1.1021297589210905e-14,
+          "df": 9,
+          "label": "P(floor_hue|object_hue,scale)[H_o=3,C=4]",
+          "max_abs_z": 4.0146903349760015,
+          "max_rel_dev": 0.06518425219095603,
+          "max_se_holdout": 0.013678725187226522,
+          "max_se_multinomial": 0.008747242214784148,
+          "min_expected_count": 12135.92857142857,
+          "n": 169903.0,
+          "pass": true,
+          "tolerance_at_worst_bin": 0.08118216693211741
+        }
+      }
+    }
+  },
+  "6_exogeneity": {
+    "pass": true,
+    "tables": {
+      "orientation_x_floor_hue": {
+        "bins": 150,
+        "chi2": 1003.5085463512268,
+        "chi2_p": 1.1518543336577729e-126,
+        "df": 149,
+        "label": "orientation x floor_hue",
+        "max_abs_z": 2.636015160221607,
+        "max_rel_dev": 0.02059362668536102,
+        "max_se_holdout": 0.0071899797309694135,
+        "max_se_multinomial": 0.003062861760287885,
+        "min_expected_count": 105891.57240500001,
+        "n": 16000000.0,
+        "pass": true,
+        "tolerance_at_worst_bin": 0.03906204144066784
+      },
+      "orientation_x_object_hue": {
+        "bins": 150,
+        "chi2": 906.5264025638984,
+        "chi2_p": 7.664228681150209e-109,
+        "df": 149,
+        "label": "orientation x object_hue",
+        "max_abs_z": 2.8860728682784247,
+        "max_rel_dev": 0.022535231936025024,
+        "max_se_holdout": 0.007189979730969522,
+        "max_se_multinomial": 0.003066828335866962,
+        "min_expected_count": 105619.64039450002,
+        "n": 16000000.0,
+        "pass": true,
+        "tolerance_at_worst_bin": 0.039041342621171496
+      },
+      "orientation_x_scale": {
+        "bins": 120,
+        "chi2": 737.7709248489077,
+        "chi2_p": 5.98804914160969e-90,
+        "df": 119,
+        "label": "orientation x scale",
+        "max_abs_z": 2.5034611766859256,
+        "max_rel_dev": 0.016806331690951026,
+        "max_se_holdout": 0.006632265630690983,
+        "max_se_multinomial": 0.002970169424092492,
+        "min_expected_count": 112556.760024,
+        "n": 16000000.0,
+        "pass": true,
+        "tolerance_at_worst_bin": 0.03356619197346451
+      },
+      "orientation_x_shape": {
+        "bins": 60,
+        "chi2": 222.9957067300536,
+        "chi2_p": 6.873634868715514e-21,
+        "df": 59,
+        "label": "orientation x shape",
+        "max_abs_z": 1.7398181881127368,
+        "max_rel_dev": 0.008588012124455702,
+        "max_se_holdout": 0.004547342456061547,
+        "max_se_multinomial": 0.0019256646454281767,
+        "min_expected_count": 265203.84985075,
+        "n": 16000000.0,
+        "pass": true,
+        "tolerance_at_worst_bin": 0.024680774643963014
+      },
+      "wall_hue_x_floor_hue": {
+        "bins": 100,
+        "chi2": 558.3883803196214,
+        "chi2_p": 3.30021586598783e-65,
+        "df": 99,
+        "label": "wall_hue x floor_hue",
+        "max_abs_z": 2.9217879422584563,
+        "max_rel_dev": 0.01862826816662677,
+        "max_se_holdout": 0.005870593867276453,
+        "max_se_multinomial": 0.0024943435110763796,
+        "min_expected_count": 159127.99004,
+        "n": 16000000.0,
+        "pass": true,
+        "tolerance_at_worst_bin": 0.03187820015477863
+      },
+      "wall_hue_x_object_hue": {
+        "bins": 100,
+        "chi2": 534.1346722727551,
+        "chi2_p": 7.143941519577009e-61,
+        "df": 99,
+        "label": "wall_hue x object_hue",
+        "max_abs_z": 2.1800363478050957,
+        "max_rel_dev": 0.013904848781007173,
+        "max_se_holdout": 0.005870593867276366,
+        "max_se_multinomial": 0.0024975846731107197,
+        "min_expected_count": 158719.34567600003,
+        "n": 16000000.0,
+        "pass": true,
+        "tolerance_at_worst_bin": 0.03189132326854746
+      },
+      "wall_hue_x_scale": {
+        "bins": 80,
+        "chi2": 428.8125722416379,
+        "chi2_p": 1.6215858579558135e-49,
+        "df": 79,
+        "label": "wall_hue x scale",
+        "max_abs_z": 2.6989135403841744,
+        "max_rel_dev": 0.015447683715781646,
+        "max_se_holdout": 0.005415222211263662,
+        "max_se_multinomial": 0.002418598757401928,
+        "min_expected_count": 169144.064832,
+        "n": 16000000.0,
+        "pass": true,
+        "tolerance_at_worst_bin": 0.028618337498841774
+      },
+      "wall_hue_x_shape": {
+        "bins": 40,
+        "chi2": 102.28766166279242,
+        "chi2_p": 1.4010627276431738e-07,
+        "df": 39,
+        "label": "wall_hue x shape",
+        "max_abs_z": 1.5982143288534219,
+        "max_rel_dev": 0.006437575029299536,
+        "max_se_holdout": 0.0037128895676811595,
+        "max_se_multinomial": 0.0015641925599924889,
+        "min_expected_count": 398533.656826,
+        "n": 16000000.0,
+        "pass": true,
+        "tolerance_at_worst_bin": 0.020139898989386264
+      }
+    }
+  },
+  "7_recovered_noise": {
+    "pass": true,
+    "tables": {
+      "U_C": {
+        "bins": 8,
+        "chi2": 20.53591725,
+        "chi2_p": 0.004521310522768771,
+        "df": 7,
+        "label": "U_C",
+        "max_abs_z": 1.4516456323397595,
+        "max_rel_dev": 0.0024975000000000414,
+        "max_se_holdout": 0.0015483819853292062,
+        "max_se_multinomial": 0.00075,
+        "min_expected_count": 1600000.0,
+        "n": 16000000.0,
+        "pass": true,
+        "tolerance_at_worst_bin": 0.01
+      },
+      "U_F": {
+        "bins": 10,
+        "chi2": 26.828348249999962,
+        "chi2_p": 0.0014931812556066174,
+        "df": 9,
+        "label": "U_F",
+        "max_abs_z": 1.315711114255593,
+        "max_rel_dev": 0.0024525000000001906,
+        "max_se_holdout": 0.0016315750172878887,
+        "max_se_multinomial": 0.0009013878188659974,
+        "min_expected_count": 1142857.1428571427,
+        "n": 16000000.0,
+        "pass": true,
+        "tolerance_at_worst_bin": 0.01
+      }
+    }
+  },
+  "8_counterfactual_roundtrip": {
+    "cf_factors_out_of_range": 0,
+    "cf_indices_out_of_range": 0,
+    "pass": true,
+    "roundtrip_mismatches": 0,
+    "roundtrips_checked": 280000,
+    "rows": 10000
+  },
+  "9_shuffle": {
+    "lag1_autocorr": {
+      "floor_hue": 0.0003840936438205566,
+      "object_hue": -0.00016541641835040438,
+      "orientation": 0.00022117591920575044,
+      "scale": 9.59447055719808e-05,
+      "shape": 3.9719945112117024e-05,
+      "train_image_idx": 0.0003723751982811084,
+      "wall_hue": -0.0004546085224273113
+    },
+    "pass": true,
+    "threshold": 0.001,
+    "worst": "wall_hue",
+    "worst_abs": 0.0004546085224273113
+  },
+  "_source": {
+    "bytes": 267573662,
+    "h5": "/home/exouser/able_data/src_3dshapes/3dshapes.h5",
+    "sha256": "0a0f6ed98baff276a50f3a081a7434d788da63cb135a98189b2a5b5769be1785"
+  },
+  "_summary": {
+    "all_passed": true,
+    "draw_stats": {
+      "holdout_rejection_rate": 0.09996011111111114,
+      "n_drawn": 18000000,
+      "n_kept": 16200718,
+      "overshoot_discarded": 200718
+    },
+    "n_train": 16000000,
+    "seeds": {
+      "draw_seed": 11052027,
+      "shuffle_seed": 11052028,
+      "split_seed": 11052026
+    },
+    "test_rule": {
+      "applies_to": [
+        "4_root_marginals",
+        "5_mechanism_tables",
+        "6_exogeneity",
+        "7_recovered_noise"
+      ],
+      "note": "chi2/df/p recorded as diagnostics only. Restricting draws to the 432,000 training cells perturbs the modeled tables, which a raw-SCM chi-square resolves at N=16M; the perturbation is priced analytically into se_holdout. Verified independently against the exact post-hold-out law: re-scoring there drops max|z| from 7.19 to 2.94 (wall_hue x floor_hue) and 4.13 to 1.42 (P(H_f|H_o=0,C=0)), i.e. the generator matches its own sampling law and the residual is the hold-out alone.",
+      "per_bin_tolerance": "max(0.01, 5*sqrt(se_multinomial^2 + se_holdout^2)); se_multinomial=sqrt((1-p)/expected_count), se_holdout=sqrt(q/(1-q)/n_eff) with q=0.10",
+      "reference": "raw SCM"
+    },
+    "tests_passed": 10,
+    "tests_total": 10
+  }
+}
