@@ -71,8 +71,19 @@ def load_hdae_config(path, require_data=True):
         hdae.encoder.cond_specs = load_cond_specs(hdae.encoder.causal_graph_path, hdae.encoder.conditioning_attrs)
     conf.hdae_conf = hdae
     conf.make_model_conf()
-    data_key = "h5_path" if raw["data"].get("type") in ("morphomnist", "causal3dident") else "lmdb_path"
+    dtype = raw["data"].get("type")
+    data_key = "h5_path" if dtype in ("morphomnist", "causal3dident", "shapes3d") else "lmdb_path"
     if require_data and not Path(raw["data"][data_key]).exists():
         raise FileNotFoundError(
             f"Packed data missing. Run: python experiments/hdae/scripts/preprocess_data.py --config {path}")
+    if require_data and dtype == "shapes3d":
+        # The source h5 alone is not enough: the frozen layout decides which grid image appears
+        # at each training position, and max_steps is tied to its length.
+        missing = [f for f in ("train_image_idx.npy", "train_layout.npy", "heldout_cells.npy")
+                   if not (Path(raw["data"]["layout_dir"]) / f).exists()]
+        if missing:
+            raise FileNotFoundError(
+                f"3DShapes layout incomplete in {raw['data']['layout_dir']}: missing {missing}. "
+                "Fetch with: aws s3 cp --recursive "
+                "s3://najibi-research-7f2a/able/shapes3d/graph_a/v1/ <layout_dir>")
     return LoadedConfig(conf, hdae, raw, str(path))

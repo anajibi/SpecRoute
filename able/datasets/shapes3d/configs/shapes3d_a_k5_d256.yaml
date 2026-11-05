@@ -1,0 +1,84 @@
+# 3DShapes Graph A -- ABLE k=5, semantic budget 256.
+#
+# Five taps, a NESTED SUBSET of k=11's, so the ladder is strictly nested. This is the
+  # depth where Causal3DIdent saturated: one tap to five was worth +0.1108 mean CF1, five to
+  # eleven only +0.0038.
+#
+# TRAINING BUDGET IS NOT A FREE PARAMETER. The frozen data protocol fixes N = 16,000,000 draws,
+# ONE PASS, the identical row order for every arm. So max_steps = 16,000,000 / 128 = 125,000
+# exactly, and the train dataloader must not reshuffle (the protocol's single global permutation
+# IS the shuffle). 125,000 steps = 37.0 passes over the 432,000 training cells -- the LOWEST
+# epoch count of any dataset in this project (CelebA 125, MorphoMNIST 78, Causal3DIdent 50),
+# which matters because over-training here has tracked epochs over a small image set, not raw
+# sample count.
+#
+# THE REPORTED CHECKPOINT IS NOT ASSUMED TO BE THE LAST ONE. 16M samples is past every
+# counterfactual optimum this project has measured: MorphoMNIST's 36,000 steps was the measured
+# peak of a 96,469-step run, Causal3DIdent k=1 degraded monotonically on all four CF metrics
+# from epoch 8 onward, and in both cases the loss-plateau criterion pointed the WRONG WAY. So
+# this run checkpoints every 12,500 steps (10 per arm) and the reported checkpoint is selected
+# on the 48,000 held-out cells, which is what the hold-out is for. Loss is not the criterion.
+#
+# No adversarial tap invariance: adv_tap_lambda is absent, which leaves the whole adversary
+# path inert (lit_module.setup returns early, no heads are built, no parameters are added).
+base_template: celeba64d2c_autoenc
+data:
+  type: shapes3d
+  h5_path: "/home/exouser/able_data/src_3dshapes/3dshapes.h5"
+  layout_dir: "/home/exouser/able_data/shapes3d/graph_a/v1"
+  image_size: 64
+  preload_images: true      # 5.9 GB, shared with fork()ed workers copy-on-write
+  n_val: 2048               # held-out cells, for monitoring only; consumes none of the 16M
+encoder:
+  type: hierarchical
+  hier_tap_block_ids: [0, 3, 6, 8, mid]
+  hier_level_dims: [52, 51, 51, 51, 51]
+  hier_block_to_level: [0, 0, 0, 1, 1, 1, 2, 2, 3, 3, 4, 4]
+  n_decoder_output_blocks: 12      # 64px: measured, 15 encoder input / 12 decoder output blocks
+  n_attributes: 4
+  conditioning_attrs: [shape, object_hue, scale, floor_hue]
+  causal_graph_path: "able/datasets/shapes3d/causal_graph_shapes3d_a.yaml"
+  # 384 (96/attr under concat_film). attr_embed_dim was the ONLY knob in the 14-config
+  # MorphoMNIST sweep whose effect survived a paired bootstrap: +0.1124 CC, CI [+0.098, +0.127].
+  attr_embed_dim: 384
+  attr_dropout_prob: 0.08
+  # INERT: Fourier features apply only to continuous attrs and all four here are categorical.
+  # Set to 0 rather than carried over at 16, so a dead knob cannot be read as an active one.
+  fourier_freqs: 0
+  attr_norm: true
+  hier_proj: linear
+conditioning:
+  strategy: per_block_attr
+  style_ch: 512               # inert for this strategy; read only by ConcatProjectionMerger
+  latent_drop_prob: 0.0
+  cfg_drop_prob: 0.1          # nulls all four attrs together -- this is what CFG needs
+  cfg_guidance_scale: 3.0     # placeholder; guidance is swept per intervention at eval
+  attr_fusion: concat_film
+train:
+  # Measured on this box, not extrapolated: batch 128 at 64px fits the 20 GB A100X-20C vGPU and
+  # runs at 2.73 it/s, so 125,000 steps is ~12.7 h per arm.
+  batch_size_per_gpu: 128
+  total_batch_size: 128
+  lr: 4.0e-4                  # the MorphoMNIST batch-128 value at this resolution and backbone
+  ema_decay: 0.9999
+  T: 1000
+  T_eval: 100
+  max_steps: 125000           # = 16,000,000 / 128, one pass. Do not change independently.
+  checkpoint_every_n_steps: 12500
+  save_top_k: -1              # keep all 10; upload-and-prune, local disk holds ~2
+  log_images_every_n_epochs: 0
+  log_images_n: 8
+  precision: 16-mixed
+  grad_clip: 1.0
+  num_workers: 4
+  compile: true
+lightning:
+  accelerator: gpu
+  devices: 1
+  strategy: auto
+  log_every_n_steps: 50
+  val_check_interval: 12500   # a STEP count, aligned with checkpoints. One pass means one
+                              # epoch, so val_check_interval: 1.0 would validate once, at the
+                              # very end, and monitor nothing for 12.7 hours.
+seed: 42
+output_dir: experiments/hdae/outputs/shapes3d_a_k5_d256

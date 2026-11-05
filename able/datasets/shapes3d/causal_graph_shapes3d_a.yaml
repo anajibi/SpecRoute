@@ -1,0 +1,43 @@
+# 3DShapes Graph A -- the model's view of the graph (conditioner cond_specs + documentation).
+#
+#   shape --> scale --> floor_hue <-- object_hue      unobserved: wall_hue, orientation
+#
+# All four conditioned factors are CATEGORICAL. Two reasons, and the second is the load-bearing
+# one:
+#   1. They are stored as integer indices, so no `range` is needed -- load_cond_specs keeps
+#      lo=hi=None and uses the round()-based path, which is exact for an index.
+#   2. Every mechanism is mod arithmetic over a cyclic group. `scale` wraps mod 8, so index 7
+#      plus 1 is index 0 -- largest scale to smallest. A continuous encoding would hand the
+#      model a linear metric the SCM does not respect, and a Fourier featurisation would make
+#      7 and 0 maximally distant when the generative process treats them as adjacent. An
+#      embedding table assigns each index its own free vector and asserts no metric at all,
+#      which is exactly right here. The same applies to the two hues.
+#
+# Consequence for evaluation: score all four by EXACT-MATCH ACCURACY, never MAE. An L1 error on
+# indices would read a legitimate mod-8 wrap as the largest possible miss.
+#
+# Consequence for `fourier_freqs`: inert. Only continuous attrs take Fourier features, and there
+# are none here. The configs set it to 0 so the dead knob cannot be mistaken for an active one.
+#
+# NOT fitted from data, and NOT loadable by experiments/hdae/causal/scm.py: that module refuses
+# parent-conditioned categorical nodes (they would need Gumbel-max abduction), and both children
+# here are exactly that. Nothing needs fitting -- the mechanisms are closed-form and exactly
+# invertible. See able/datasets/shapes3d/scm_exact.py, which is the SCM for this dataset.
+
+attributes: [shape, object_hue, scale, floor_hue]
+edges:
+  - [shape, scale]
+  - [scale, floor_hue]
+  - [object_hue, floor_hue]
+
+nodes:
+  shape:      {kind: categorical, num_classes: 4}     # root
+  object_hue: {kind: categorical, num_classes: 10}    # root
+  scale:      {kind: categorical, num_classes: 8}     # parent: shape;  m_C = (0,2,5,7), noise P_8
+  floor_hue:  {kind: categorical, num_classes: 10}    # parents: object_hue, scale; noise P_10
+
+# Exogenous, logged, never conditioned or intervened on, must be preserved (FC_unobs pool):
+#   wall_hue    10 classes
+#   orientation 15 classes
+
+scm: able/datasets/shapes3d/scm_exact.py   # exact, closed form -- no checkpoint to fit or load

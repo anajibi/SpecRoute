@@ -18,6 +18,7 @@ ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT))  # Note: Consider replacing this with an editable install
 
 import torch
+import numpy as np
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks import ModelCheckpoint, LearningRateMonitor
 from pytorch_lightning.loggers import TensorBoardLogger
@@ -27,6 +28,7 @@ from experiments.hdae.hdae.lit_module import HDAELitModule
 from experiments.hdae.data.datamodule import CelebAHQDataModule
 from experiments.hdae.data.morpho_datamodule import MorphoMNISTDataModule
 from experiments.hdae.data.causal3dident_datamodule import Causal3DIdentDataModule
+from able.datasets.shapes3d.datamodule import Shapes3DDataModule
 
 
 # --- Execution Logic Encapsulated ---
@@ -43,7 +45,25 @@ def main():
     d = cfg.raw['data']
     t = cfg.raw['train']
 
-    if d.get('type') == 'causal3dident':
+    if d.get('type') == 'shapes3d':
+        dm = Shapes3DDataModule(
+            d['h5_path'],
+            d['layout_dir'],
+            batch_size=t['batch_size_per_gpu'],
+            num_workers=t['num_workers'],
+            preload_images=d.get('preload_images', True),
+            n_val=d.get('n_val', 2048),
+            seed=cfg.raw.get('seed', 0),
+        )
+        steps = len(np.load(f"{d['layout_dir']}/train_image_idx.npy", mmap_mode='r'))
+        steps //= t['batch_size_per_gpu'] * int(t.get('accum_batches', 1))
+        if int(t['max_steps']) != steps:
+            raise ValueError(
+                f"max_steps={t['max_steps']} is not the protocol's ONE PASS over the frozen "
+                f"layout, which is {steps} steps at this batch/accum. The 3DShapes protocol "
+                "freezes N=16,000,000 draws seen exactly once, identically for every arm; a "
+                "mismatch silently makes this run incomparable to the others.")
+    elif d.get('type') == 'causal3dident':
         dm = Causal3DIdentDataModule(
             d['h5_path'],
             test_h5_path=d.get('test_h5_path'),
