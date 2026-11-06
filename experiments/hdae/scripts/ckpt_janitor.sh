@@ -19,6 +19,14 @@
 # Fixes: poll every 30 s, KEEP defaults to 1 rather than 2, and the free-space check below
 # warns loudly while there is still time to act.
 #
+# THIRD DEFECT, fixed 2026-11-06: it recomputed the local ETag of every present checkpoint on
+# EVERY 30 s poll, including ones already verified. Measured on the 3DShapes k=11 run: 38.4 GB
+# read in 14 minutes to re-hash one 1.52 GB file it had already matched, which over a 12 h run
+# is ~2 TB of pointless I/O. Verified ETags are now cached in <dir>/.verified/<name>, keyed on
+# size AND mtime, so a file that changes at all is re-hashed from scratch. The cache is only
+# ever written AFTER a successful match against s3, and nothing is deleted on the strength of a
+# cache entry alone: the remote head-object still has to agree at prune time.
+#
 #   ckpt_janitor.sh <checkpoint-dir> <s3-prefix> [keep]
 set -u
 DIR="${1:?usage: ckpt_janitor.sh <dir> <s3-prefix> [keep]}"
@@ -38,6 +46,25 @@ while True:
     m.append(hashlib.md5(b).digest())
 print(hashlib.md5(b''.join(m)).hexdigest()+'-'+str(len(m)) if len(m)>1 else hashlib.md5(open(sys.argv[1],'rb').read()).hexdigest())
 " "$1"
+}
+
+VDIR="$DIR/.verified"
+mkdir -p "$VDIR" 2>/dev/null || true
+
+cached_etag () {  # echo the cached etag iff the cache matches the file's current size+mtime
+  local c="$VDIR/$(basename "$1")" cs cm ce
+  [ -f "$c" ] || return 0
+  read -r cs cm ce < "$c" 2>/dev/null || return 0
+  [ "$cs" = "$(stat -c%s "$1")" ] && [ "$cm" = "$(stat -c%Y "$1")" ] && printf '%s' "$ce"
+}
+
+etag_of () {     # cached etag if usable, else hash it and remember the result
+  local t
+  t=$(cached_etag "$1")
+  if [ -n "$t" ]; then printf '%s' "$t"; return; fi
+  t=$(etag "$1")
+  printf '%s %s %s\n' "$(stat -c%s "$1")" "$(stat -c%Y "$1")" "$t" > "$VDIR/$(basename "$1")"
+  printf '%s' "$t"
 }
 
 while true; do
@@ -60,9 +87,11 @@ while true; do
       aws s3 cp "$f" "s3://$BUCKET/$key" --only-show-errors || continue
       remote=$(aws s3api head-object --bucket "$BUCKET" --key "$key" --query ETag --output text 2>/dev/null | tr -d '"')
     fi
-    local_tag=$(etag "$f")
+    was_cached=$(cached_etag "$f")
+    local_tag=$(etag_of "$f")
     if [ "$local_tag" = "$remote" ]; then
-      echo "[$(date -u +%FT%TZ)] verified in s3: $b"
+      # Announce once, not every poll -- this log is read to tell progress from trouble.
+      [ -z "$was_cached" ] && echo "[$(date -u +%FT%TZ)] verified in s3: $b"
     else
       echo "[$(date -u +%FT%TZ)] ETAG MISMATCH, keeping local: $b (local $local_tag remote $remote)"
     fi
@@ -75,7 +104,7 @@ while true; do
     i=$((i+1)); [ "$i" -le "$KEEP" ] && continue
     b=$(basename "$f")
     remote=$(aws s3api head-object --bucket "$BUCKET" --key "$PREFIX/$b" --query ETag --output text 2>/dev/null | tr -d '"')
-    [ -n "$remote" ] && [ "$(etag "$f")" = "$remote" ] && { rm -f "$f"; echo "[$(date -u +%FT%TZ)] pruned (safe in s3): $b"; }
+    [ -n "$remote" ] && [ "$(etag_of "$f")" = "$remote" ] && { rm -f "$f"; rm -f "$VDIR/$b"; echo "[$(date -u +%FT%TZ)] pruned (safe in s3): $b"; }
   done
   free_gb=$(df -BG --output=avail "$DIR" | tail -1 | tr -dc '0-9')
   n_last=$(ls -1 "$DIR"/last*.ckpt 2>/dev/null | wc -l)
