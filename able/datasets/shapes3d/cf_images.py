@@ -236,9 +236,12 @@ def main():
         cf_fac = {"shape": S2, "object_hue": Ho2, "scale": C2, "floor_hue": Hf2}
         truth_idx = counterfactual_index(S, Ho, C, Hf, Hw, R, var, val)
 
+        # Hoisted so the tensor the captions are checked against is THE SAME OBJECT that is
+        # handed to make_cond -- checking a freshly rebuilt copy would only prove y_of is
+        # deterministic, not that the figure reports what the model actually received.
+        y_cf = y_of(cf_fac, specs, dev)
         with torch.no_grad():
-            img_prop = render(lit, sampler, x_T, lit.ema_model.make_cond(zs, y_of(cf_fac, specs, dev)),
-                              args.guidance)
+            img_prop = render(lit, sampler, x_T, lit.ema_model.make_cond(zs, y_cf), args.guidance)
         truth = ((grab(truth_idx) + 1) / 2).clamp(0, 1)
 
         tgt = np.stack([S2, Ho2, C2, Hf2, Hw, R], axis=1)
@@ -279,6 +282,31 @@ def main():
             [(tup(S2, Ho2, C2, Hf2, i), BLACK) for i in range(args.n)],
             [(tup(tS, tHo, tC, tHf, i), GREY) for i in range(args.n)],
         ]
+        # A caption that disagrees with the conditioning would be worse than no caption, so it
+        # is an assertion, not a convention. y_cf is raw-unit (to_cond_values clamps but does
+        # not re-index), so it must equal the integer tuple drawn, column for column.
+        y_np = y_cf.detach().cpu().numpy()
+        want = np.stack([cf_fac[k] for k in COND], axis=1).astype(np.float64)
+        if not np.array_equal(y_np.astype(np.float64), want):
+            raise AssertionError(
+                f"do({var}): cf caption does not match the tensor passed to make_cond.\n"
+                f"  caption tuples : {want.astype(int).tolist()}\n"
+                f"  tensor to model: {y_np.tolist()}")
+        # Compare against the STRING THAT WILL BE DRAWN (cell_caps), not a freshly recomputed
+        # tuple. Recomputing checks y_of against cf_fac -- two things that are both correct --
+        # and lets a wrong caption through; a negative control with the descendants frozen in
+        # cell_caps only was caught by this form and missed by the other.
+        cf_row = cell_caps[ROWS.index("cf")]
+        for i in range(args.n):
+            from_tensor = "\u00b7".join(str(int(v)) for v in y_np[i])
+            drawn = cf_row[i][0]
+            if drawn != from_tensor:
+                raise AssertionError(
+                    f"do({var}) panel {i}: the caption drawn is {drawn!r} but the row handed "
+                    f"to make_cond is {from_tensor!r} (order {COND})")
+        order = "\u00b7".join(COND)
+        print(f"  caption check: all {args.n} cf captions == tensor rows passed to make_cond "
+              f"(order {order})")
         short = {"shape": "shp", "object_hue": "obj", "scale": "scl", "floor_hue": "flr"}[var]
         labels = [f"{short} {cur[i]}>{val[i]}" for i in range(args.n)]
         footer = [
