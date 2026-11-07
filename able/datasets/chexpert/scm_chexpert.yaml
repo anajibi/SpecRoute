@@ -85,11 +85,28 @@ interventions:
 eval_only_candidates:
   [support_devices, ap_pa, edema, lung_opacity, consolidation, atelectasis, pneumothorax]
 
-# FROZEN 2026-11-07 by the section-5 gate (held-out AUC >= 0.85). Two of the
-# seven candidates survive. See MANIFEST_v0.md: edema, consolidation and
-# lung_opacity fail on held-out labels while scoring .90+ against radiologist
-# image truth, so they are dropped by label noise rather than by the
-# predictor; pneumothorax is kept on held-out evidence while its 200-image
-# image-truth interval is [.58,.97] and says next to nothing.
-eval_only_kept: [ap_pa, pneumothorax]
-eval_only_dropped: [support_devices, edema, lung_opacity, consolidation, atelectasis]
+# v0, FROZEN 2026-11-07, superseded the same day. Gated on held-out AUC >= 0.85,
+# which kept two of seven: [ap_pa, pneumothorax].
+#
+# v1 AMENDMENT 2026-11-07. Eval-only attributes are now gated on radiologist_val
+# AUC >= 0.85 with the 95% bootstrap CI lower bound >= 0.80. The v0 gate ran
+# against report-text labels, so a label whose REPORTS are inconsistent scored
+# low however well the predictor read the image -- it was measuring label noise,
+# not predictor capability. The CI condition exists because radiologist_val is
+# 200 images and a bare point estimate would admit a label on luck.
+#
+#   re-admitted: edema (.9111 [.861,.952]), consolidation (.9126 [.866,.950]),
+#                lung_opacity (.9027 [.856,.943]) -- all three failed v0 on
+#                held-out at .83/.72/.72
+#   revoked:     pneumothorax -- .8110 but [.6007,.9722], so it fails both the
+#                point estimate and the CI floor. v0 had kept it on held-out
+#                .8694 alone.
+#   still out:   support_devices (.8483 [.793,.897]), atelectasis (.7612)
+#
+# NOTE, not acted on: cardiomegaly scores .8080 [.7376,.8684] on radiologist_val
+# and would NOT pass this gate. It is a MODELED attribute and the amendment is
+# scoped to eval-only, so it keeps the v0 gate, which it passes at .8813. If the
+# amendment is ever extended to modeled attributes, the graph needs revisiting.
+eval_only_kept: [ap_pa, edema, lung_opacity, consolidation]
+eval_only_dropped: [support_devices, atelectasis, pneumothorax]
+eval_only_kept_v0: [ap_pa, pneumothorax]

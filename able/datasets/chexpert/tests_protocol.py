@@ -1,4 +1,4 @@
-"""CheXpert protocol v0, section 7: the seven tests that have to pass before freeze.
+"""CheXpert protocol section 7: the seven tests that have to pass before freeze.
 
   1 split disjointness   no patient on both sides, and none shared with radiologist_val
   2 label policy         no -1 and no NaN survives in any modeled column
@@ -58,6 +58,7 @@ def main():
     ap.add_argument("--predictor-report", default=None)
     ap.add_argument("--out", default=None)
     ap.add_argument("--skip-determinism", action="store_true")
+    ap.add_argument("--version", default="v1")
     args = ap.parse_args()
     D = args.data
     raw_csv = args.raw_csv or f"{D}/source_csv/train.csv"
@@ -202,7 +203,7 @@ def main():
     passed = [k for k, v in R.items() if v.get("pass") is True]
     failed = [k for k, v in R.items() if v.get("pass") is False]
     pending = [k for k, v in R.items() if v.get("pass") is None]
-    rec = {"protocol": "chexpert v0 section 7", "passed": passed, "failed": failed,
+    rec = {"protocol": f"chexpert {args.version} section 7", "passed": passed, "failed": failed,
            "pending": pending, "tests": R}
     with open(out, "w") as f:
         json.dump(rec, f, indent=2, default=jsonable)
