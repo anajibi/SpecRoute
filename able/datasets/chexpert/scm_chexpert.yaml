@@ -82,5 +82,14 @@ interventions:
 # Eval-only attributes. They are never intervened on and never conditioned on;
 # they exist so FC can be measured on things the model was not told about.
 # Kept only if the section-5 predictor reaches AUC >= 0.85 on them.
-eval_only:
+eval_only_candidates:
   [support_devices, ap_pa, edema, lung_opacity, consolidation, atelectasis, pneumothorax]
+
+# FROZEN 2026-11-07 by the section-5 gate (held-out AUC >= 0.85). Two of the
+# seven candidates survive. See MANIFEST_v0.md: edema, consolidation and
+# lung_opacity fail on held-out labels while scoring .90+ against radiologist
+# image truth, so they are dropped by label noise rather than by the
+# predictor; pneumothorax is kept on held-out evidence while its 200-image
+# image-truth interval is [.58,.97] and says next to nothing.
+eval_only_kept: [ap_pa, pneumothorax]
+eval_only_dropped: [support_devices, edema, lung_opacity, consolidation, atelectasis]
