@@ -103,10 +103,16 @@ def main():
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--tag", default="")
     ap.add_argument("--out", default="experiments/hdae/outputs/shapes3d_cf_figs/cf_metrics.json")
+    ap.add_argument("--mem-frac", type=float, default=0.0,
+                    help="hard cap on this process's GPU share; protects a concurrent training run")
     args = ap.parse_args()
 
     gs = [float(g) for g in args.guidance.split(",")]
     dev = torch.device("cuda")
+    # A cap means an OOM lands on THIS process instead of starving a training run that may have
+    # many hours invested in it -- the cheap failure instead of the expensive one.
+    if args.mem_frac > 0:
+        torch.cuda.set_per_process_memory_fraction(args.mem_frac, 0)
     lit, cfg, step = load_model(args.config, args.ckpt, dev)
     specs = lit.model.hdae_conf.encoder.cond_specs
     sampler = lit.conf._make_diffusion_conf(args.T).make_sampler()
