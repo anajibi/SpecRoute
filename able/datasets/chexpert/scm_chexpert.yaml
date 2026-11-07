@@ -1,0 +1,86 @@
+# CheXpert protocol v0, section 2: the structural causal model.
+#
+#   sex -----------------------> x
+#   age --> effusion ----------> x
+#    \ ---> cardiomegaly ------> x
+#
+# No edge between effusion and cardiomegaly. They are correlated in the data,
+# but the correlation is not causal: both are driven by an unmodeled common
+# cause (cardiac failure). Drawing an arrow between them would make every
+# do(effusion) counterfactual move cardiomegaly for the wrong reason, and the
+# FC score would then be measuring a mechanism that does not exist. The
+# residual dependence is left to the correlation correction r_k(a) instead.
+#
+# Every mechanism is one Gumbel-max over K logits. For K=2 this IS the
+# "logistic with Gumbel noise" the protocol asks for: with logits (0, t),
+# argmax(logit_k + G_k) = 1 exactly when G_1 - G_0 > -t, and G_1 - G_0 is
+# standard logistic, so P(1) = sigmoid(t). One mechanism covers both the
+# 3-way age variable and the binary ones, and one abduction routine therefore
+# covers all four.
+#
+# Parameters are NOT in this file. They are fitted saturated (one logit per
+# parent configuration, so the fit is exact) on the TRAIN SPLIT only, by
+# fit_scm.py, and written to scm_params.json with its own sha256. The split is
+# what gets frozen here; refitting on the cohort would be fitting on the thing
+# being measured.
+
+name: chexpert_v0
+seed: 20261107
+
+variables:
+  sex:
+    kind: categorical
+    values: {0: Female, 1: Male}
+    parents: []
+    mechanism: gumbel_max
+  age_bin:
+    kind: categorical
+    values: {0: "<45", 1: "45-65", 2: ">65"}
+    parents: []
+    mechanism: gumbel_max
+    note: >
+      Binned, not continuous. The counterfactual has to be a value the image
+      decoder has actually seen conditioned on, and a 3-way bin keeps every
+      do(age) target well populated. Boundaries are inclusive at both ends of
+      bin 1: age < 45 -> 0, 45 <= age <= 65 -> 1, age > 65 -> 2.
+  effusion:
+    kind: categorical
+    values: {0: absent, 1: present}
+    parents: [age_bin]
+    mechanism: gumbel_max
+  cardiomegaly:
+    kind: categorical
+    values: {0: absent, 1: present}
+    parents: [age_bin]
+    mechanism: gumbel_max
+
+# Topological order. Abduction and the counterfactual re-run both walk this.
+order: [sex, age_bin, effusion, cardiomegaly]
+
+interventions:
+  do_sex:
+    target: sex
+    kind: flip
+    propagates_to: []
+  do_age:
+    target: age_bin
+    kind: uniform_over_other_values
+    propagates_to: [effusion, cardiomegaly]
+    note: >
+      The only intervention with descendants. Both findings are recomputed
+      from the SAME abducted Gumbels under the new age logits, so a finding
+      flips only where the new logits cross that unit's own noise draw.
+  do_effusion:
+    target: effusion
+    kind: flip
+    propagates_to: []
+  do_cardiomegaly:
+    target: cardiomegaly
+    kind: flip
+    propagates_to: []
+
+# Eval-only attributes. They are never intervened on and never conditioned on;
+# they exist so FC can be measured on things the model was not told about.
+# Kept only if the section-5 predictor reaches AUC >= 0.85 on them.
+eval_only:
+  [support_devices, ap_pa, edema, lung_opacity, consolidation, atelectasis, pneumothorax]

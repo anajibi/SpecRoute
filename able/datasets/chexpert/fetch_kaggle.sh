@@ -25,8 +25,11 @@ if [ "$free" -lt "$need" ]; then
   exit 1
 fi
 
-if [ ! -f "$HOME/.kaggle/kaggle.json" ] && [ -z "${KAGGLE_KEY:-}" ]; then
-  echo "no Kaggle credentials: put the token at ~/.kaggle/kaggle.json or export KAGGLE_USERNAME/KAGGLE_KEY" >&2
+# Probe the API rather than looking for ~/.kaggle/kaggle.json: this CLI reaches
+# ashery/chexpert (a public dataset) without a local token, so a file check
+# would refuse a fetch that in fact works.
+if ! "$KAG" datasets files ashery/chexpert >/dev/null 2>&1; then
+  echo "Kaggle API unreachable: put a token at ~/.kaggle/kaggle.json or export KAGGLE_USERNAME/KAGGLE_KEY" >&2
   exit 2
 fi
 
