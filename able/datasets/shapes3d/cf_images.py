@@ -225,13 +225,16 @@ def main():
         short = {"shape": "shp", "object_hue": "obj", "scale": "scl", "floor_hue": "flr"}[var]
         labels = [f"{short} {cur[i]}>{val[i]}" for i in range(args.n)]
         canvas = annotate(gnp, labels, 66, 18, 62, ROWS)
-        out = os.path.join(args.outdir, f"cf_{var}_step{step}.png")
+        # Guidance BELONGS in the filename: it is swept, and without it every render
+        # silently overwrites the previous guidance value's figures under the same name.
+        out = os.path.join(args.outdir, f"cf_{var}_step{step}_g{args.guidance:g}.png")
         canvas.save(out)
         print(f"  wrote {out}")
 
-    with open(os.path.join(args.outdir, f"cf_report_step{step}.json"), "w") as f:
+    report_path = os.path.join(args.outdir, f"cf_report_step{step}_g{args.guidance:g}.json")
+    with open(report_path, "w") as f:
         json.dump(results, f, indent=2)
-    print(f"\nwrote {args.outdir}/cf_report_step{step}.json")
+    print(f"\nwrote {report_path}")
 
 
 if __name__ == "__main__":
