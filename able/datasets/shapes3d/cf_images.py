@@ -111,16 +111,52 @@ def load_predictors(pdir, device):
     return preds
 
 
-def annotate(grid_np, labels, cell, pad_top, pad_left, row_names):
+def _font(size):
+    from PIL import ImageFont
+    for pth in ("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+                "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf"):
+        if os.path.exists(pth):
+            return ImageFont.truetype(pth, size)
+    return ImageFont.load_default()
+
+
+def compose(rows, col_labels, row_names, cell_caps, footer,
+            cell=64, gap=4, pad_top=20, pad_left=52, cap_h=14, foot_h=34):
+    """Lay the panels out with a caption UNDER every single image.
+
+    make_grid packs cells edge to edge, which leaves nowhere to put per-cell text, so the
+    grid is composed here instead. `cell_caps[r][c]` is drawn under panel (r, c) and carries
+    the EXACT conditioning tuple handed to the model for that panel -- the point being that a
+    reader can check the numbers the model was given rather than take the caption's word for it.
+    """
     from PIL import Image, ImageDraw
-    h, w = grid_np.shape[:2]
-    canvas = Image.new("RGB", (w + pad_left, h + pad_top), (255, 255, 255))
-    canvas.paste(Image.fromarray(grid_np), (pad_left, pad_top))
+    f_hdr, f_cap, f_row = _font(11), _font(10), _font(11)
+    n_rows, n_cols = len(rows), len(rows[0])
+    row_h = cell + cap_h
+    # The footer is usually WIDER than the grid, so size the canvas to whichever is larger and
+    # give it a line per footer entry -- otherwise the legend silently runs off the edge.
+    def _w(t):
+        try:
+            return int(f_cap.getlength(t))
+        except AttributeError:
+            return len(t) * 6
+    W = max(pad_left + n_cols * (cell + gap), max(_w(t) for t in footer) + 10)
+    foot_h = 8 + 12 * len(footer)
+    H = pad_top + n_rows * row_h + foot_h
+    canvas = Image.new("RGB", (W, H), (255, 255, 255))
     d = ImageDraw.Draw(canvas)
-    for i, txt in enumerate(labels):
-        d.text((pad_left + i * cell + 3, 4), txt, fill=(0, 0, 0))
-    for r, nm in enumerate(row_names):
-        d.text((4, pad_top + r * cell + cell // 2 - 4), nm, fill=(0, 0, 0))
+    for c, txt in enumerate(col_labels):
+        d.text((pad_left + c * (cell + gap) + 2, 5), txt, fill=(0, 0, 0), font=f_hdr)
+    for r in range(n_rows):
+        y = pad_top + r * row_h
+        d.text((4, y + cell // 2 - 6), row_names[r], fill=(0, 0, 0), font=f_row)
+        for c in range(n_cols):
+            xx = pad_left + c * (cell + gap)
+            canvas.paste(Image.fromarray(rows[r][c]), (xx, y))
+            cap, col = cell_caps[r][c]
+            d.text((xx + 1, y + cell + 2), cap, fill=col, font=f_cap)
+    for k, line in enumerate(footer):
+        d.text((4, pad_top + n_rows * row_h + 4 + k * 12), line, fill=(70, 70, 70), font=f_cap)
     return canvas
 
 
@@ -191,7 +227,6 @@ def main():
     print(f"\nrecon: L1 vs source {results['recon']['l1_vs_source']:.4f}  "
           f"factor agreement {results['recon']['factor_agreement']}")
 
-    import torchvision
     for var in MODELED:
         K = CARDINALITY[var]
         # a target different from the factual value for every source, deterministic given seed
@@ -219,12 +254,41 @@ def main():
         print(f"  accuracy     {rec['accuracy']}")
         print(f"  L1 vs truth  {rec['l1_vs_truth']:.4f}")
 
-        stack = torch.cat([src01, recon, img_prop, truth]).cpu()
-        g = torchvision.utils.make_grid(stack, nrow=args.n, padding=2)
-        gnp = (g.permute(1, 2, 0).numpy() * 255).astype(np.uint8)
+        # The truth row's factors are read back off the real grid cell, NOT copied from the
+        # SCM's prediction -- otherwise the figure would assert agreement instead of showing it.
+        tHf, tHw, tHo, tC, tS, tR = decode_index(np.atleast_1d(truth_idx))
+
+        def panels(t):
+            a = (t.clamp(0, 1).permute(0, 2, 3, 1).numpy() * 255).astype(np.uint8)
+            return [a[i] for i in range(a.shape[0])]
+
+        rows_px = [panels(src01.cpu()), panels(recon.cpu()),
+                   panels(img_prop.cpu()), panels(truth.cpu())]
+
+        BLACK, GREY = (0, 0, 0), (120, 120, 120)
+
+        def tup(a, b, c, e, i):
+            return f"{a[i]}\u00b7{b[i]}\u00b7{c[i]}\u00b7{e[i]}"
+
+        # Row captions. recon and cf are the two rows the model is CONDITIONED on, so they
+        # carry the exact tuple passed to make_cond; source and truth are real renders and
+        # their tuples are ground truth, drawn grey so the two cannot be confused.
+        cell_caps = [
+            [(tup(S, Ho, C, Hf, i), GREY) for i in range(args.n)],
+            [(tup(S, Ho, C, Hf, i), BLACK) for i in range(args.n)],
+            [(tup(S2, Ho2, C2, Hf2, i), BLACK) for i in range(args.n)],
+            [(tup(tS, tHo, tC, tHf, i), GREY) for i in range(args.n)],
+        ]
         short = {"shape": "shp", "object_hue": "obj", "scale": "scl", "floor_hue": "flr"}[var]
         labels = [f"{short} {cur[i]}>{val[i]}" for i in range(args.n)]
-        canvas = annotate(gnp, labels, 66, 18, 62, ROWS)
+        footer = [
+            "caption = shape\u00b7object_hue\u00b7scale\u00b7floor_hue, the conditioning order "
+            "the model receives (raw category indices, pre-embedding).",
+            "black = exactly what was passed to make_cond for that panel.  "
+            "grey = ground-truth factors of a real render (no conditioning involved).",
+            f"g = {args.guidance:g}   T = {args.T}   checkpoint step {step}",
+        ]
+        canvas = compose(rows_px, labels, ROWS, cell_caps, footer)
         # Guidance BELONGS in the filename: it is swept, and without it every render
         # silently overwrites the previous guidance value's figures under the same name.
         out = os.path.join(args.outdir, f"cf_{var}_step{step}_g{args.guidance:g}.png")
