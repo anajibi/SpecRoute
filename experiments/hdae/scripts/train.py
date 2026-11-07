@@ -54,15 +54,30 @@ def main():
             preload_images=d.get('preload_images', True),
             n_val=d.get('n_val', 2048),
             seed=cfg.raw.get('seed', 0),
+            train_start=int(d.get('train_start', 0)),
         )
-        steps = len(np.load(f"{d['layout_dir']}/train_image_idx.npy", mmap_mode='r'))
-        steps //= t['batch_size_per_gpu'] * int(t.get('accum_batches', 1))
+        rows = len(np.load(f"{d['layout_dir']}/train_image_idx.npy", mmap_mode='r'))
+        per_step = t['batch_size_per_gpu'] * int(t.get('accum_batches', 1))
+        steps = rows // per_step
+        # A continuation run drops the rows already consumed, so its loader is SHORTER than one
+        # pass -- but max_steps still has to name the end of the full pass, because global_step
+        # is restored from the checkpoint and counts from there. The invariant that actually
+        # matters is steps_already_done + steps_left == one pass, which is what this checks.
+        start = int(d.get('train_start', 0))
+        if start % per_step:
+            raise ValueError(
+                f"train_start={start} is not a multiple of {per_step} samples per step; the "
+                "continuation would not land on a batch boundary of the frozen stream.")
         if int(t['max_steps']) != steps:
             raise ValueError(
                 f"max_steps={t['max_steps']} is not the protocol's ONE PASS over the frozen "
                 f"layout, which is {steps} steps at this batch/accum. The 3DShapes protocol "
                 "freezes N=16,000,000 draws seen exactly once, identically for every arm; a "
                 "mismatch silently makes this run incomparable to the others.")
+        if start:
+            print(f"[protocol] continuation: skipping {start:,} rows already consumed "
+                  f"({start // per_step:,} steps), {(rows - start) // per_step:,} steps left, "
+                  f"one pass = {steps:,} steps")
     elif d.get('type') == 'causal3dident':
         dm = Causal3DIdentDataModule(
             d['h5_path'],

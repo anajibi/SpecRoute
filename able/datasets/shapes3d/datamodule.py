@@ -91,8 +91,17 @@ class Shapes3DHeldout(Dataset):
 
 class Shapes3DDataModule(_Base):
     def __init__(self, h5_path, layout_dir, batch_size=128, num_workers=4,
-                 preload_images=True, n_val=2048, seed=0):
+                 preload_images=True, n_val=2048, seed=0, train_start=0):
         super().__init__()
+        # train_start RESUMES THE FROZEN STREAM, it does not reshuffle it. Lightning 1.9.5
+        # without PL_FAULT_TOLERANT_TRAINING restores `batch_progress` but NOT the train
+        # sampler position, so a plain mid-epoch resume silently rewinds the loader to row 0:
+        # the counter reads 125,000 at the end while the tail of the stream was never seen.
+        # Setting train_start to (steps_done * batch) drops exactly the rows already consumed,
+        # so the run sees all 16,000,000 draws once, in the frozen order. It must be an exact
+        # multiple of the batch size or the batch boundaries shift and the stream is no longer
+        # the one the other arms saw.
+        self.train_start = int(train_start)
         self.h5_path, self.layout_dir = h5_path, str(layout_dir).rstrip("/")
         self.batch_size, self.num_workers = batch_size, num_workers
         self.preload_images, self.n_val, self.seed = preload_images, int(n_val), int(seed)
@@ -109,6 +118,21 @@ class Shapes3DDataModule(_Base):
         held_mask[heldout] = True
         if held_mask[image_idx[:1_000_000]].any():
             raise ValueError("training rows fall in held-out cells -- wrong layout_dir?")
+        if self.train_start:
+            if self.train_start % self.batch_size:
+                raise ValueError(
+                    f"train_start={self.train_start} is not a multiple of batch_size="
+                    f"{self.batch_size}; batch boundaries would shift and the stream would "
+                    "stop matching the one the other arms saw.")
+            if self.train_start >= len(image_idx):
+                raise ValueError(
+                    f"train_start={self.train_start} is beyond the frozen stream "
+                    f"({len(image_idx)} rows) -- nothing left to train on.")
+            image_idx = image_idx[self.train_start:]
+            layout = layout[self.train_start:]
+            logging.info("3dshapes: RESUMING frozen stream at row %s -- %s rows (%s steps) left",
+                         f"{self.train_start:,}", f"{len(image_idx):,}",
+                         f"{len(image_idx) // self.batch_size:,}")
         images = _Images(self.h5_path, self.preload_images)
         self.train_set = Shapes3DLayout(images, image_idx, layout)
         val_cells = np.random.RandomState(self.seed).choice(
