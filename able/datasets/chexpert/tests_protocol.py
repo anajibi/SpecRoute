@@ -1,10 +1,12 @@
 """CheXpert protocol section 7: the seven tests that have to pass before freeze.
 
   1 split disjointness   no patient on both sides, and none shared with radiologist_val
-  2 label policy         no -1 and no NaN survives in any modeled column
+  2 label policy         no -1 and no NaN survives in any modeled column, and every
+                        modeled finding is CERTAIN wherever the protocol relies on it
   3 prevalence           every kept label within +-5 points of the source datasheet
   4 graph sanity         both finding rates monotone across the three age bins
-  5 predictor gate       modeled labels >= 0.85 held-out AUC; eval-only kept iff >= 0.85
+  5 predictor gate       every attribute, modeled or eval-only, clears the v2
+                        radiologist_val gate (AUC >= 0.85 and CI lower bound >= 0.80)
   6 image integrity      no constant row; 20 random rows rendered and looked at
   7 determinism          rebuilding meta, split, SCM and cohort reproduces the sha256s
 
@@ -30,7 +32,11 @@ import scm_exact as S
 from build_meta import MODELED_FINDINGS, EVAL_ONLY_FINDINGS
 
 PY_ = "/home/exouser/SpecRoute/.venv/bin/python"
-MODELED = ["sex", "age_bin", "effusion", "cardiomegaly"]
+# v2: edema replaced cardiomegaly. MODELED_FINDINGS in build_meta.py is NOT this
+# list -- that dict is frozen at v0 because it defines the filter the image
+# memmap is aligned to. These are the v2 ROLES, which is a different thing.
+MODELED = ["sex", "age_bin", "effusion", "edema"]
+FINDING_NODES = [v for v in S.ORDER if v in ("effusion", "edema", "cardiomegaly")]
 TOL = 0.05
 
 
@@ -58,7 +64,7 @@ def main():
     ap.add_argument("--predictor-report", default=None)
     ap.add_argument("--out", default=None)
     ap.add_argument("--skip-determinism", action="store_true")
-    ap.add_argument("--version", default="v1")
+    ap.add_argument("--version", default="v2")
     args = ap.parse_args()
     D = args.data
     raw_csv = args.raw_csv or f"{D}/source_csv/train.csv"
@@ -87,16 +93,38 @@ def main():
     }
 
     # ---- 2 label policy
-    allcols = MODELED + list(EVAL_ONLY_FINDINGS) + ["ap_pa"]
+    allcols = [c for c in MODELED if c in meta.columns] + list(EVAL_ONLY_FINDINGS) + ["ap_pa"]
     neg1 = {c: int((meta[c] == -1).sum()) for c in allcols}
     nan = {c: int(meta[c].isna().sum()) for c in meta.columns}
+
+    # v2 certainty: a modeled finding whose -1 was folded to 0 by the v0 filter
+    # must not reach the SCM fit or the cohort. The sidecar is what makes that
+    # checkable; without it this test would pass vacuously, because the folded
+    # column contains no -1 to find.
+    unc = pd.read_csv(f"{D}/label_uncertainty.csv")
+    cert = {
+        "sidecar_rows": len(unc),
+        "sidecar_aligned": bool((unc["path"].values == meta["path"].values).all()),
+    }
+    for v in S.CERTAIN_REQUIRED:
+        u = unc[f"uncertain_{v}"].to_numpy()
+        cert[v] = {
+            "uncertain_rows_in_frozen_set": int(u.sum()),
+            "uncertain_excluded_from_scm_fit": int((u[split == 0] == 1).sum()),
+            "uncertain_cohort_sources": int(u[src_rows].sum()),
+            "folded_to_zero_in_csv": int(((u == 1) & (meta[v].to_numpy() == 0)).sum()),
+        }
+    cert["pass"] = (cert["sidecar_aligned"]
+                    and all(cert[v]["uncertain_cohort_sources"] == 0 for v in S.CERTAIN_REQUIRED))
+
     R["2_label_policy"] = {
         "minus_one_counts": neg1, "nan_counts": {k: v for k, v in nan.items() if v},
         "age_bin_values": sorted(int(v) for v in meta["age_bin"].unique()),
         "age_years_range": [int(meta["age_years"].min()), int(meta["age_years"].max())],
+        "modeled_finding_certainty": cert,
         "pass": sum(neg1.values()) == 0 and sum(nan.values()) == 0
                 and sorted(int(v) for v in meta["age_bin"].unique()) == [0, 1, 2]
-                and meta["age_years"].between(18, 100).all(),
+                and meta["age_years"].between(18, 100).all() and cert["pass"],
     }
 
     # ---- 3 prevalence against the source datasheet
@@ -117,10 +145,21 @@ def main():
                          "pass": all(r["pass"] for r in rows3.values())}
 
     # ---- 4 graph sanity
-    rates = {k: [float(meta.loc[meta["age_bin"] == a, k].mean()) for a in (0, 1, 2)]
-             for k in ("effusion", "cardiomegaly")}
+    # each finding node is checked on the rows its own mechanism is fitted on:
+    # all rows, except that a CERTAIN_REQUIRED node uses its certain rows, which
+    # is where its conditionals actually come from.
+    rates, basis = {}, {}
+    for k in FINDING_NODES:
+        if k in S.CERTAIN_REQUIRED:
+            m = meta.loc[unc[f"uncertain_{k}"].to_numpy() == 0]
+            basis[k] = "certain rows only"
+        else:
+            m = meta
+            basis[k] = "all rows"
+        rates[k] = [float(m.loc[m["age_bin"] == a, k].mean()) for a in (0, 1, 2)]
     mono = {k: bool(v[0] < v[1] < v[2]) for k, v in rates.items()}
-    R["4_graph_sanity"] = {"rate_by_age_bin": {k: [round(x, 4) for x in v] for k, v in rates.items()},
+    R["4_graph_sanity"] = {"nodes": FINDING_NODES, "measured_on": basis,
+                           "rate_by_age_bin": {k: [round(x, 4) for x in v] for k, v in rates.items()},
                            "monotone_increasing": mono, "pass": all(mono.values())}
 
     # ---- 5 predictor gate
@@ -128,13 +167,26 @@ def main():
         "/home/exouser/SpecRoute/experiments/hdae/outputs/attr_predictors_chexpert/predictor_report.json"
     if os.path.exists(prep):
         pr = json.load(open(prep))
+        g = pr["v2_gate"]
+        modeled_fail = [k for k in MODELED if not g[k]["v2_gate_pass"]]
+        kept_eval = pr["eval_only_v2"]
+        eval_consistent = all(g[k]["v2_gate_pass"] for k in kept_eval)
+        # the modeled set in the report, the SCM's own ORDER and this file's
+        # MODELED must agree, or the gate is being read against a graph that
+        # is not the one the cohort was built from
+        graph_consistent = (sorted(pr["modeled_v2"]) == sorted(MODELED) == sorted(S.ORDER))
         R["5_predictor_gate"] = {
-            "report": prep, "gate": pr["gate"],
-            "heldout_auc": {k: pr["heldout"][k].get("auc") for k in pr["heldout"] if k != "age_bin"},
-            "age_bin_auc_ovr_macro": pr["heldout"]["age_bin"]["auc_ovr_macro"],
-            "kept_labels": pr["kept_labels"], "dropped_by_gate": pr["dropped_by_gate"],
-            "modeled_failing_gate": pr["modeled_failing_gate"],
-            "pass": len(pr["modeled_failing_gate"]) == 0,
+            "report": prep,
+            "gate": "radiologist_val AUC >= 0.85 and 95% bootstrap CI lower bound >= 0.80",
+            "scope": "all attributes (v2 amendment extended it from eval-only to modeled)",
+            "radiologist_val_auc": {k: g[k]["radiologist_val_auc"] for k in g},
+            "radiologist_val_ci95": {k: g[k]["radiologist_val_ci95"] for k in g},
+            "modeled_v2": pr["modeled_v2"], "eval_only_v2": kept_eval,
+            "kept_labels": pr["kept_labels"], "dropped_by_gate": pr["dropped_by_gate_v2"],
+            "modeled_failing_gate": modeled_fail,
+            "eval_only_kept_all_pass": eval_consistent,
+            "graph_matches_gate": graph_consistent,
+            "pass": len(modeled_fail) == 0 and eval_consistent and graph_consistent,
         }
     else:
         R["5_predictor_gate"] = {"pass": None, "note": f"{prep} not written yet"}
@@ -177,6 +229,8 @@ def main():
             run(f"{HERE}/build_cohort.py", "--data", td, "--out", f"{td}/c.json")
             pairs = {
                 "chexpert_meta.csv": (f"{td}/m.csv", f"{D}/chexpert_meta.csv"),
+                "label_uncertainty.csv": (f"{td}/label_uncertainty.csv",
+                                          f"{D}/label_uncertainty.csv"),
                 "split.npy": (f"{td}/s.npy", f"{D}/split.npy"),
                 "scm_params.json": (f"{td}/scm_params.json", f"{D}/scm_params.json"),
                 "eval_cohort.json": (f"{td}/c.json", f"{D}/eval_cohort.json"),

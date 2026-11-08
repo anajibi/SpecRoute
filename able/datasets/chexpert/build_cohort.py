@@ -1,14 +1,21 @@
-"""CheXpert protocol v0, section 6: the frozen evaluation cohort.
+"""CheXpert protocol v2, section 6: the frozen evaluation cohort.
 
 512 held-out sources x 4 interventions = 2,048 counterfactuals.
 
 Sources are drawn balanced over the 24 joint cells of
-(sex, age_bin, effusion, cardiomegaly) rather than in proportion to their
-natural frequency. The rare cells are the informative ones -- a 25-year-old
-with both findings is where a model that has merely learned the marginals
-gives itself away -- and proportional sampling would put about three of them
-in the cohort. All 24 cells hold at least 46 held-out images, so 21 or 22 per
-cell is drawn without any cell running dry.
+(sex, age_bin, effusion, edema) rather than in proportion to their natural
+frequency. The rare cells are the informative ones -- a 25-year-old with both
+findings is where a model that has merely learned the marginals gives itself
+away -- and proportional sampling would put about three of them in the
+cohort. After the certainty filter below every cell still holds at least 127
+held-out images, so 21 or 22 per cell is drawn without any cell running dry.
+
+v2: edema is modeled, so no source may carry an uncertain edema label. The
+frozen row set cannot be refiltered (images_224.npy is aligned to it), so the
+1,107 held-out rows whose edema label was uncertain are excluded from the
+SOURCE POOL instead. This is a restriction of eligibility, not of the data,
+and it is not attribute selection -- which attributes are modeled was decided
+on radiologist_val, never here.
 
 One target per intervention type: sex flips, age goes to one of the other two
 bins drawn uniformly, each finding flips. do(age) is the only one with
@@ -27,8 +34,9 @@ import pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import scm_exact as S
 
-CELL = ["sex", "age_bin", "effusion", "cardiomegaly"]
-INTERVENTIONS = ["do_sex", "do_age", "do_effusion", "do_cardiomegaly"]
+CELL = ["sex", "age_bin", "effusion", "edema"]
+INTERVENTIONS = ["do_sex", "do_age", "do_effusion", "do_edema"]
+DESCENDANTS_OF_AGE = ["effusion", "edema"]
 
 
 def allocate(counts, total, rng):
@@ -64,6 +72,21 @@ def main():
     split = np.load(f"{args.data}/split.npy")
     params = S.load(f"{args.data}/scm_params.json")
     held = np.flatnonzero(split == 1)
+
+    # modeled findings must be certain: drop ineligible sources before stratifying
+    upath = f"{args.data}/label_uncertainty.csv"
+    n_excluded = 0
+    if S.CERTAIN_REQUIRED:
+        if not os.path.exists(upath):
+            raise SystemExit(f"{upath} is required when {S.CERTAIN_REQUIRED} is modeled")
+        unc = pd.read_csv(upath)
+        if not (unc["path"].values == meta["path"].values).all():
+            raise SystemExit("label_uncertainty.csv is not row-aligned with chexpert_meta.csv")
+        ok = np.ones(len(meta), bool)
+        for v in S.CERTAIN_REQUIRED:
+            ok &= (unc[f"uncertain_{v}"].to_numpy() == 0)
+        n_excluded = int((~ok[held]).sum())
+        held = held[ok[held]]
     hm = meta.iloc[held]
 
     rng = np.random.default_rng(args.seed)
@@ -89,13 +112,13 @@ def main():
         "do_sex": ("sex", 1 - vals["sex"]),
         "do_age": ("age_bin", tgt_age),
         "do_effusion": ("effusion", 1 - vals["effusion"]),
-        "do_cardiomegaly": ("cardiomegaly", 1 - vals["cardiomegaly"]),
+        "do_edema": ("edema", 1 - vals["edema"]),
     }
     cf = {k: S.forward(vals, g, params, fixed={var: val}) for k, (var, val) in fixed.items()}
 
     # sanity: only the target and its descendants may move
     for k, (var, _) in fixed.items():
-        allowed = {var} | ({"effusion", "cardiomegaly"} if var == "age_bin" else set())
+        allowed = {var} | (set(DESCENDANTS_OF_AGE) if var == "age_bin" else set())
         for v in S.ORDER:
             moved = cf[k][v] != vals[v]
             if v not in allowed and moved.any():
@@ -118,17 +141,19 @@ def main():
                 "factual": fac,
                 "counterfactual": c,
                 "changed": [v for v in S.ORDER if c[v] != fac[v]],
-                "descendants_moved": [v for v in ("effusion", "cardiomegaly")
+                "descendants_moved": [v for v in DESCENDANTS_OF_AGE
                                       if var == "age_bin" and c[v] != fac[v]],
             })
 
     rec = {
-        "protocol": "chexpert v0 section 6",
+        "protocol": "chexpert v2 section 6",
         "seed": args.seed,
         "n_sources": int(len(rows)),
         "n_counterfactuals": len(items),
         "source_rows": rows.tolist(),
         "stratified_over": CELL,
+        "heldout_sources_excluded_uncertain": n_excluded,
+        "certainty_required_on": S.CERTAIN_REQUIRED,
         "cells_filled": len(take),
         "per_cell": {str(k): int(v) for k, v in take.items()},
         "meta_sha256": hashlib.sha256(open(f"{args.data}/chexpert_meta.csv", "rb").read()).hexdigest(),
@@ -138,6 +163,9 @@ def main():
     with open(out, "w") as f:
         json.dump(rec, f, indent=1)
 
+    if n_excluded:
+        print(f"source pool: {len(held)} held-out rows "
+              f"({n_excluded} excluded for an uncertain {'/'.join(S.CERTAIN_REQUIRED)} label)")
     print(f"{len(rows)} sources over {len(take)} cells "
           f"({min(take.values())}-{max(take.values())} each), {len(items)} counterfactuals")
     for k in INTERVENTIONS:

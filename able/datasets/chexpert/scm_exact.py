@@ -1,4 +1,4 @@
-"""CheXpert protocol v0, section 2: the SCM, with exact abduction.
+"""CheXpert protocol v2, section 2: the SCM, with exact abduction.
 
 Four variables, one mechanism. Every variable -- the 3-way age bin and the
 three binaries alike -- is a Gumbel-max:
@@ -29,28 +29,53 @@ fitted marginals and conditionals reproduce the training split exactly.
 import json
 import numpy as np
 
-ORDER = ["sex", "age_bin", "effusion", "cardiomegaly"]
-PARENTS = {"sex": [], "age_bin": [], "effusion": ["age_bin"], "cardiomegaly": ["age_bin"]}
-CARD = {"sex": 2, "age_bin": 3, "effusion": 2, "cardiomegaly": 2}
+# v2: edema replaces cardiomegaly as the second modeled finding. Cardiomegaly
+# fails the radiologist gate at .808 with a TPR ceiling of .515, so a CC score
+# on do(cardiomegaly) would have been bounded by the instrument rather than by
+# the generator. See scm_chexpert.yaml for the dated amendment.
+ORDER = ["sex", "age_bin", "effusion", "edema"]
+PARENTS = {"sex": [], "age_bin": [], "effusion": ["age_bin"], "edema": ["age_bin"]}
+CARD = {"sex": 2, "age_bin": 3, "effusion": 2, "edema": 2}
+
+# Modeled findings have to be certain (protocol section 3 step 3 drops -1).
+# The frozen row set was filtered under v0, where edema was eval-only and its
+# -1 was folded to 0, and the image memmap cannot be rebuilt to a new row set.
+# So the certainty policy is enforced where it still can be: edema's mechanism
+# is fitted only on rows whose edema label is certain, and no cohort source
+# carries an uncertain edema label. CERTAIN_REQUIRED names the variables that
+# rule applies to.
+CERTAIN_REQUIRED = ["edema"]
 
 
 # --------------------------------------------------------------------------- fit
 
-def fit(values, min_count=1):
+def fit(values, min_count=1, masks=None):
     """Saturated log-probability logits from a dict of integer arrays.
 
     Counts are floored at `min_count` so that an unobserved cell becomes very
     improbable rather than impossible: a -inf logit would make that category
     unreachable under every intervention and would put a -inf in the abduction
     arithmetic.
+
+    `masks` optionally restricts the rows a given variable is fitted on. It is
+    how the modeled-finding certainty policy is applied to edema without
+    refiltering the frozen row set: rows with an uncertain edema label still
+    exist (and still carry a folded 0 in the frozen CSV) but do not contribute
+    to edema's conditionals. Dropping them from the FIT is not the same as
+    dropping them from the DATA, and the difference is recorded in the params.
     """
+    masks = masks or {}
     p = {"cardinality": CARD, "parents": PARENTS, "order": ORDER, "logits": {}}
     n = len(values["sex"])
+    n_fit_per_var = {}
     for var in ORDER:
         K = CARD[var]
         pars = PARENTS[var]
+        m_var = masks.get(var)
+        keep = np.ones(n, bool) if m_var is None else np.asarray(m_var, bool)
+        n_fit_per_var[var] = int(keep.sum())
         if not pars:
-            c = np.bincount(values[var], minlength=K).astype(np.float64)
+            c = np.bincount(values[var][keep], minlength=K).astype(np.float64)
             c = np.maximum(c, min_count)
             p["logits"][var] = np.log(c / c.sum()).reshape(1, K).tolist()
         else:
@@ -58,12 +83,13 @@ def fit(values, min_count=1):
             P = CARD[par]
             rows = np.zeros((P, K))
             for a in range(P):
-                m = values[par] == a
+                m = (values[par] == a) & keep
                 c = np.bincount(values[var][m], minlength=K).astype(np.float64)
                 c = np.maximum(c, min_count)
                 rows[a] = np.log(c / c.sum())
             p["logits"][var] = rows.tolist()
     p["n_fit"] = int(n)
+    p["n_fit_per_variable"] = n_fit_per_var
     return p
 
 

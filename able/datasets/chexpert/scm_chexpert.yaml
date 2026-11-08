@@ -1,15 +1,18 @@
-# CheXpert protocol v0, section 2: the structural causal model.
+# CheXpert protocol v2, section 2: the structural causal model.
 #
 #   sex -----------------------> x
 #   age --> effusion ----------> x
-#    \ ---> cardiomegaly ------> x
+#    \ ---> edema -------------> x
 #
-# No edge between effusion and cardiomegaly. They are correlated in the data,
-# but the correlation is not causal: both are driven by an unmodeled common
-# cause (cardiac failure). Drawing an arrow between them would make every
-# do(effusion) counterfactual move cardiomegaly for the wrong reason, and the
-# FC score would then be measuring a mechanism that does not exist. The
-# residual dependence is left to the correlation correction r_k(a) instead.
+# No edge between effusion and edema. They are correlated in the data (phi =
+# +0.122 on certain-label rows, about three times the +0.041 that v0's
+# effusion/cardiomegaly pair carried), but the correlation is not causal: both
+# are driven by an unmodeled common cause, volume overload in cardiac failure.
+# Drawing an arrow between them would make every do(effusion) counterfactual
+# move edema for the wrong reason, and the FC score would then be measuring a
+# mechanism that does not exist. The residual dependence is left to the
+# correlation correction r_k(a) instead -- and because it is three times what
+# v0 carried, r_k(a) matters correspondingly more in v2 than it did before.
 #
 # Every mechanism is one Gumbel-max over K logits. For K=2 this IS the
 # "logistic with Gumbel noise" the protocol asks for: with logits (0, t),
@@ -24,7 +27,7 @@
 # what gets frozen here; refitting on the cohort would be fitting on the thing
 # being measured.
 
-name: chexpert_v0
+name: chexpert_v2
 seed: 20261107
 
 variables:
@@ -48,14 +51,26 @@ variables:
     values: {0: absent, 1: present}
     parents: [age_bin]
     mechanism: gumbel_max
-  cardiomegaly:
+  edema:
     kind: categorical
     values: {0: absent, 1: present}
     parents: [age_bin]
     mechanism: gumbel_max
+    certainty_required: true
+    note: >
+      v2 node, replacing cardiomegaly. Modeled findings have to be certain.
+      The frozen row set was filtered under v0, when edema was eval-only and
+      its -1 was folded to 0, and images_224.npy is aligned to that row set
+      and cannot be rebuilt -- the 11.5 GB archive is deleted. So the
+      certainty policy is enforced downstream instead: edema's mechanism is
+      fitted only on rows whose label is certain (8,998 train rows excluded)
+      and no cohort source carries an uncertain edema label (1,107 held-out
+      rows excluded from the source pool). The flags live in
+      label_uncertainty.csv, which build_meta.py writes beside the frozen CSV
+      without touching its bytes. 10,105 of 171,996 rows (5.88%) are affected.
 
 # Topological order. Abduction and the counterfactual re-run both walk this.
-order: [sex, age_bin, effusion, cardiomegaly]
+order: [sex, age_bin, effusion, edema]
 
 interventions:
   do_sex:
@@ -65,7 +80,7 @@ interventions:
   do_age:
     target: age_bin
     kind: uniform_over_other_values
-    propagates_to: [effusion, cardiomegaly]
+    propagates_to: [effusion, edema]
     note: >
       The only intervention with descendants. Both findings are recomputed
       from the SAME abducted Gumbels under the new age logits, so a finding
@@ -74,39 +89,57 @@ interventions:
     target: effusion
     kind: flip
     propagates_to: []
-  do_cardiomegaly:
-    target: cardiomegaly
+  do_edema:
+    target: edema
     kind: flip
     propagates_to: []
 
-# Eval-only attributes. They are never intervened on and never conditioned on;
-# they exist so FC can be measured on things the model was not told about.
-# Kept only if the section-5 predictor reaches AUC >= 0.85 on them.
-eval_only_candidates:
-  [support_devices, ap_pa, edema, lung_opacity, consolidation, atelectasis, pneumothorax]
-
-# v0, FROZEN 2026-11-07, superseded the same day. Gated on held-out AUC >= 0.85,
-# which kept two of seven: [ap_pa, pneumothorax].
+# ---------------------------------------------------------------- version log
 #
-# v1 AMENDMENT 2026-11-07. Eval-only attributes are now gated on radiologist_val
-# AUC >= 0.85 with the 95% bootstrap CI lower bound >= 0.80. The v0 gate ran
+# v0, FROZEN 2026-11-07, superseded the same day. Graph was
+# sex->x, age->effusion->x, age->cardiomegaly->x. Eval-only attributes gated on
+# held-out AUC >= 0.85, which kept two of seven: [ap_pa, pneumothorax].
+#
+# v1 AMENDMENT 2026-11-07. Eval-only attributes gated on radiologist_val AUC
+# >= 0.85 with the 95% bootstrap CI lower bound >= 0.80 instead. The v0 gate ran
 # against report-text labels, so a label whose REPORTS are inconsistent scored
 # low however well the predictor read the image -- it was measuring label noise,
-# not predictor capability. The CI condition exists because radiologist_val is
-# 200 images and a bare point estimate would admit a label on luck.
+# not predictor capability. Re-admitted edema, consolidation, lung_opacity;
+# revoked pneumothorax. Recorded, without acting on it, that cardiomegaly scores
+# .808 [.738,.868] against radiologists and would not pass the new gate.
 #
-#   re-admitted: edema (.9111 [.861,.952]), consolidation (.9126 [.866,.950]),
-#                lung_opacity (.9027 [.856,.943]) -- all three failed v0 on
-#                held-out at .83/.72/.72
-#   revoked:     pneumothorax -- .8110 but [.6007,.9722], so it fails both the
-#                point estimate and the CI floor. v0 had kept it on held-out
-#                .8694 alone.
-#   still out:   support_devices (.8483 [.793,.897]), atelectasis (.7612)
+# v2 AMENDMENT 2026-11-08. The radiologist_val gate now applies to MODELED
+# attributes too, and cardiomegaly fails it.
 #
-# NOTE, not acted on: cardiomegaly scores .8080 [.7376,.8684] on radiologist_val
-# and would NOT pass this gate. It is a MODELED attribute and the amendment is
-# scoped to eval-only, so it keeps the v0 gate, which it passes at .8813. If the
-# amendment is ever extended to modeled attributes, the graph needs revisiting.
-eval_only_kept: [ap_pa, edema, lung_opacity, consolidation]
-eval_only_dropped: [support_devices, atelectasis, pneumothorax]
+#   For an eval-only attribute a weak gate is a reporting caveat. For a MODELED
+#   one it is a cap on the headline number: CC is computed on the modeled
+#   attributes, and cardiomegaly's TPR ceiling on real radiologist-labelled
+#   images is .515 at its Youden threshold. A perfect generator asked to
+#   do(cardiomegaly=1) would still be scored wrong on nearly half its outputs,
+#   and no amount of ABLE training would move that -- the bound is the
+#   instrument, not the model. Edema passes at .911 [.861,.952] with a .833
+#   ceiling, so edema takes the second modeled slot and cardiomegaly leaves the
+#   protocol: it fails the gate as a modeled attribute and fails the same .85
+#   bar as an eval-only one. Its column stays in the frozen CSV, unused.
+#
+#   Also gated here, on THIS project's classifier rather than on XRV, the two
+#   labels the label-noise audit could not check:
+#     support_devices            .8483 [.793,.897] -> OUT (fails both conditions)
+#     enlarged_cardiomediastinum no head in best.ckpt -> OUT. XRV reads it at
+#                                .839, but XRV is not the scoring instrument,
+#                                and gating it on this project's classifier
+#                                would mean training a head, which is out of
+#                                scope. Dropped under the stated fallback.
+#
+#   chexpert_meta.csv, split.npy and images_224.npy are BYTE-IDENTICAL to v0.
+#   scm_params.json and eval_cohort.json change, which is the whole point.
+
+modeled: [sex, age_bin, effusion, edema]
+eval_only_kept: [ap_pa, lung_opacity, consolidation]
+out: [cardiomegaly, support_devices, enlarged_cardiomediastinum, atelectasis,
+      pneumothorax, lung_lesion, fracture, pneumonia, pleural_other]
+
+# history
+modeled_v0_v1: [sex, age_bin, effusion, cardiomegaly]
+eval_only_kept_v1: [ap_pa, edema, lung_opacity, consolidation]
 eval_only_kept_v0: [ap_pa, pneumothorax]

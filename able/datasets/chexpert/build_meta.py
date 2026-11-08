@@ -1,4 +1,13 @@
-"""CheXpert protocol v0, section 3: filtering -> chexpert_meta.csv.
+"""CheXpert protocol section 3: filtering -> chexpert_meta.csv.
+
+FROZEN AT v0 AND DELIBERATELY NOT CHANGED SINCE. The filter below defines the
+row set that images_224.npy is aligned to, and that memmap cannot be rebuilt
+(the 11.5 GB archive is deleted to make room for it). v2 promotes edema from
+eval-only to modeled, which under step 3 would drop its 10,105 uncertain rows
+and invalidate every row index in the memmap, the split and the predictor. So
+the filter stays exactly as v0 left it and v2 enforces the modeled-finding
+certainty policy downstream instead -- see label_uncertainty.csv below, which
+this script now also writes, and the masks in fit_scm.py / build_cohort.py.
 
 Reads train.csv straight out of the Kaggle archive (nothing is extracted; the
 archive is ~11 GB and the disk cannot hold a JPEG extraction beside the image
@@ -13,7 +22,13 @@ Filters, applied in the order the protocol fixes them:
      blank -> 0 on those two
   4. eval-only labels: -1 -> 0, blank -> 0
   5. one image per study, the first frontal view listed for that study
-  6. write the metadata CSV
+  6. write the metadata CSV, and label_uncertainty.csv beside it
+
+Step 6's sidecar carries, for every label column and every surviving row, the
+flags the fold in step 4 destroys: whether the source cell was -1 and whether
+it was blank. chexpert_meta.csv is NOT touched by this -- its bytes are frozen
+-- so the sidecar is the only way a later protocol version can apply a
+stricter policy to a label without refiltering.
 
 Step 3 drops uncertainty rather than modelling it: the two modeled findings
 have to be binary for the SCM's logistic mechanisms to be identified, and an
@@ -34,6 +49,19 @@ EVAL_ONLY_FINDINGS = {
     "consolidation": "Consolidation",
     "atelectasis": "Atelectasis",
     "pneumothorax": "Pneumothorax",
+}
+# Never modeled and never eval-only: these columns are not written to
+# chexpert_meta.csv at all. They appear only in label_uncertainty.csv, so that
+# a later protocol version can read their uncertain/blank fractions without
+# re-reading the source CSV. Listing them here does NOT put them through the
+# filter -- only MODELED_FINDINGS and EVAL_ONLY_FINDINGS do that, and those two
+# dicts are frozen at v0 because the image memmap is aligned to their output.
+AUDIT_ONLY_FINDINGS = {
+    "enlarged_cardiomediastinum": "Enlarged Cardiomediastinum",
+    "lung_lesion": "Lung Lesion",
+    "fracture": "Fracture",
+    "pneumonia": "Pneumonia",
+    "pleural_other": "Pleural Other",
 }
 OUT_COLS = [
     "path", "patient_id", "study_id", "sex", "age_years", "age_bin",
@@ -94,6 +122,7 @@ def main():
 
     need = ["Path", "Sex", "Age", "Frontal/Lateral", "AP/PA"]
     need += list(MODELED_FINDINGS.values()) + list(EVAL_ONLY_FINDINGS.values())
+    need += list(AUDIT_ONLY_FINDINGS.values())
     missing = [c for c in need if c not in df.columns]
     if missing:
         raise SystemExit(f"columns absent from {src}: {missing}")
@@ -136,7 +165,16 @@ def main():
         v = pd.to_numeric(df[col], errors="coerce")
         counts[f"{key}_uncertain_to_zero"] = int((v == -1).sum())
         counts[f"{key}_blank_to_zero"] = int(v.isna().sum())
+        df[f"__unc_{key}"] = (v == -1).astype(np.int8)
+        df[f"__blank_{key}"] = v.isna().astype(np.int8)
         df[key] = v.replace(-1, 0).fillna(0).astype(np.int8)
+    # the modeled findings had their -1 rows dropped outright in step 3, so their
+    # uncertain flag is all-zero by construction; the blank flag is not, and the
+    # fold to 0 there is just as much a convention as the eval-only one.
+    for key, col in {**MODELED_FINDINGS, **AUDIT_ONLY_FINDINGS}.items():
+        v = pd.to_numeric(df[col], errors="coerce")
+        df[f"__unc_{key}"] = (v == -1).astype(np.int8)
+        df[f"__blank_{key}"] = v.isna().astype(np.int8)
     # ap_pa is eval-only too, so a blank view position also becomes 0 (= AP).
     # That is the protocol's rule, but it is a real conflation and the count is
     # logged so the predictor report can be read with it in mind.
@@ -172,6 +210,22 @@ def main():
 
     os.makedirs(os.path.dirname(os.path.abspath(args.out)) or ".", exist_ok=True)
     out.to_csv(args.out, index=False)
+
+    # the uncertainty sidecar, aligned row-for-row with chexpert_meta.csv
+    labels = list(MODELED_FINDINGS) + list(EVAL_ONLY_FINDINGS) + list(AUDIT_ONLY_FINDINGS)
+    unc = pd.DataFrame({"path": df["Path"].values})
+    for key in labels:
+        unc[f"uncertain_{key}"] = df[f"__unc_{key}"].values
+        unc[f"blank_{key}"] = df[f"__blank_{key}"].values
+    unc = unc.reset_index(drop=True)
+    assert (unc["path"].values == out["path"].values).all(), "sidecar lost row alignment"
+    upath = os.path.join(os.path.dirname(os.path.abspath(args.out)), "label_uncertainty.csv")
+    unc.to_csv(upath, index=False)
+    counts["label_uncertainty_csv"] = upath
+    counts["label_uncertainty_sha256"] = hashlib.sha256(open(upath, "rb").read()).hexdigest()
+    counts["uncertain_fraction"] = {k: round(float(unc[f"uncertain_{k}"].mean()), 6) for k in labels}
+    counts["blank_fraction"] = {k: round(float(unc[f"blank_{k}"].mean()), 6) for k in labels}
+    logging.info("        uncertainty sidecar -> %s", upath)
     counts["rows_out"] = len(out)
     counts["patients"] = int(out["patient_id"].nunique())
     counts["sha256"] = hashlib.sha256(open(args.out, "rb").read()).hexdigest()
