@@ -1,0 +1,197 @@
+{
+  "checkpoint": "k1_snapshot.ckpt",
+  "global_step": 6248,
+  "guidance": 3.0,
+  "T": 100,
+  "n_score": 16,
+  "n_fig": 4,
+  "rows": [
+    707,
+    9836,
+    39105,
+    49355,
+    52778,
+    87492,
+    100228,
+    107682,
+    116298,
+    131124,
+    139394,
+    141362,
+    148944,
+    153409,
+    156295,
+    162595
+  ],
+  "caveat": "n is a tiny subsample of the held-out split; the frozen protocol cohort is 512 sources / 2,048 counterfactuals. These numbers show whether conditioning works, not how well.",
+  "recon": {
+    "l1_vs_source": 0.00838648434728384,
+    "attr_agreement_with_factual": {
+      "sex": 1.0,
+      "age_bin": 0.8125,
+      "effusion": 1.0,
+      "edema": 0.9375
+    }
+  },
+  "interventions": {
+    "do_edema": {
+      "moves": [
+        "edema"
+      ],
+      "target_hit_rate": 0.25,
+      "cc": -1.4,
+      "cc_trivial_error": 0.3125,
+      "fc_per_attribute": {
+        "sex": {
+          "error": 0.0,
+          "trivial": 0.3125,
+          "fc": 1.0,
+          "r_k_a": {
+            "mean_prob_by_group": {
+              "0": 0.434,
+              "1": 0.4204
+            },
+            "max_shift": 0.0136
+          }
+        },
+        "age_bin": {
+          "error": 0.25,
+          "trivial": 0.5625,
+          "fc": 0.5555555555555556,
+          "r_k_a": {
+            "mean_prob_by_group": {
+              "0": 0.3278,
+              "1": 0.4171,
+              "2": 0.4823
+            },
+            "max_shift": 0.1545
+          }
+        },
+        "effusion": {
+          "error": 0.0,
+          "trivial": 0.5,
+          "fc": 1.0,
+          "r_k_a": {
+            "mean_prob_by_group": {
+              "0": 0.3592,
+              "1": 0.5138
+            },
+            "max_shift": 0.1546
+          }
+        }
+      },
+      "t6_ceiling_for_target": {
+        "threshold": 0.5174,
+        "threshold_tuned_on": "select set (inside train split), report labels",
+        "role": "modeled",
+        "radiologist_val": {
+          "tpr_ceiling": 0.8333,
+          "fpr_floor": 0.1329,
+          "n_pos": 42,
+          "n_neg": 158
+        },
+        "heldout_report_labels": {
+          "tpr_ceiling": 0.7882,
+          "fpr_floor": 0.2874,
+          "n_pos": 4603,
+          "n_neg": 13137
+        },
+        "new_modeled_node_in_v2": true
+      },
+      "descendants_scored": {}
+    },
+    "do_edema_hard": {
+      "moves": [
+        "edema"
+      ],
+      "target_hit_rate": 0.25,
+      "cc": -1.4,
+      "cc_trivial_error": 0.3125,
+      "fc_per_attribute": {
+        "sex": {
+          "error": 0.0,
+          "trivial": 0.3125,
+          "fc": 1.0,
+          "r_k_a": {
+            "mean_prob_by_group": {
+              "0": 0.434,
+              "1": 0.4204
+            },
+            "max_shift": 0.0136
+          }
+        },
+        "age_bin": {
+          "error": 0.25,
+          "trivial": 0.5625,
+          "fc": 0.5555555555555556,
+          "r_k_a": {
+            "mean_prob_by_group": {
+              "0": 0.3278,
+              "1": 0.4171,
+              "2": 0.4823
+            },
+            "max_shift": 0.1545
+          }
+        },
+        "effusion": {
+          "error": 0.0,
+          "trivial": 0.5,
+          "fc": 1.0,
+          "r_k_a": {
+            "mean_prob_by_group": {
+              "0": 0.3592,
+              "1": 0.5138
+            },
+            "max_shift": 0.1546
+          }
+        }
+      },
+      "t6_ceiling_for_target": {
+        "threshold": 0.5174,
+        "threshold_tuned_on": "select set (inside train split), report labels",
+        "role": "modeled",
+        "radiologist_val": {
+          "tpr_ceiling": 0.8333,
+          "fpr_floor": 0.1329,
+          "n_pos": 42,
+          "n_neg": 158
+        },
+        "heldout_report_labels": {
+          "tpr_ceiling": 0.7882,
+          "fpr_floor": 0.2874,
+          "n_pos": 4603,
+          "n_neg": 13137
+        },
+        "new_modeled_node_in_v2": true
+      },
+      "descendants_scored": {}
+    },
+    "do_age": {
+      "moves": [
+        "age_bin",
+        "effusion",
+        "edema"
+      ],
+      "target_hit_rate": 0.125,
+      "cc": -0.3999999999999999,
+      "cc_trivial_error": 0.625,
+      "fc_per_attribute": {
+        "sex": {
+          "error": 0.0,
+          "trivial": 0.3125,
+          "fc": 1.0,
+          "r_k_a": null
+        }
+      },
+      "t6_ceiling_for_target": {
+        "role": "modeled",
+        "radiologist_val_accuracy_ceiling": 0.815,
+        "heldout_accuracy_ceiling": 0.7938
+      },
+      "descendants_scored": {
+        "effusion": 0.9375,
+        "edema": 0.8125
+      }
+    }
+  }
+}
