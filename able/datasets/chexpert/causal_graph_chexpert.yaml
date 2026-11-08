@@ -1,0 +1,65 @@
+# Causal DAG over the four CheXpert attributes the v2 protocol models.
+#
+# Frozen as protocol v2 on 2026-11-08. See scm_chexpert.yaml for the full version log and the
+# dated amendments; this file is the MODEL-SIDE view of the same graph, in the format
+# attr_conditioner.load_cond_specs reads. The two must agree, and tests_protocol.py section 7
+# test 5 asserts that the modeled set here matches scm_exact.ORDER.
+#
+# Structure:
+#
+#     sex    ---->  x            (no finding parents: sex is a root with no children in the graph)
+#     age_bin ---+----> effusion
+#                |
+#                +----> edema
+#
+# sex and age_bin are independent roots. Unlike CelebA-HQ's asserted Male/Young independence,
+# this one is close to true in the data and is not a sampling artifact being papered over.
+#
+# WHY THESE FOUR. Every modeled attribute has to clear the v2 gate on radiologist_val -- AUC
+# >= .85 with a bootstrap CI lower bound >= .80 -- because a counterfactual score is bounded by
+# the instrument that reads it. Measured (200 radiologist-labelled images, 2000-resample
+# percentile bootstrap):
+#     sex       .9945            age_bin   .9523 [.930, .972]
+#     effusion  .9049 [.858,.944] edema    .9111 [.859,.944]
+# Cardiomegaly was the second modeled finding in v0/v1 and was REPLACED by edema: it reads
+# .8080 with a TPR ceiling of .515, so a CC score on do(cardiomegaly) would have been capped by
+# measurement rather than by the generator. Three independent readers agree -- XRV .8063,
+# CheXzero .8544 (CI lo .797, still short), ours .8080 -- see docs/chexpert_readers_all.md.
+#
+# CATEGORICAL age_bin. age_bin is a 3-class root, not a binary. load_cond_specs handles
+# categorical conditioning attrs directly, and the root-only restriction that applies to
+# categoricals elsewhere is satisfied here: age_bin has no parents. Abduction for it is exact
+# Gumbel-max in scm_exact.py, which treats the 3-way bin and the binaries with ONE mechanism.
+#
+# STORED VALUE RANGES. chexpert_meta.csv stores sex/effusion/edema as {0, 1} and age_bin as
+# {0, 1, 2} -- NOT CelebA's {-1, +1}. The binary ranges below are therefore [0, 1], and
+# age_bin carries no `range` because its stored value is already the class index.
+#
+# UNCERTAINTY. The frozen row set was filtered under v0, where edema was eval-only and its -1
+# was folded to 0. images_224.npy is aligned to that row set by index and cannot be rebuilt, so
+# the certainty policy is enforced downstream instead: edema's mechanism is fitted only on rows
+# whose edema label is certain, no cohort source carries an uncertain edema label, and the
+# generator is not trained on them either (datamodule.py, require_certain).
+attributes: [sex, age_bin, effusion, edema]
+edges:
+  - [age_bin, effusion]
+  - [age_bin, edema]
+
+nodes:
+  sex:
+    kind: binary
+    # 0 = Female, 1 = Male, as build_meta.py writes it.
+    range: [0.0, 1.0]
+  age_bin:
+    kind: categorical
+    # 0 = <50, 1 = 50-65, 2 = >65. No `range`: the stored value IS the class index.
+    num_classes: 3
+  effusion:
+    kind: binary
+    range: [0.0, 1.0]
+  edema:
+    kind: binary
+    range: [0.0, 1.0]
+
+# The SCM parameters fitted to the train split, saturated, one logit per parent configuration.
+scm_checkpoint: /home/exouser/able_data/chexpert/scm_params.json

@@ -1,0 +1,122 @@
+# CheXpert, k=1 (single tap) ladder, fine-tuned from DiffAE's ffhq256_autoenc.
+# Protocol v2 attribute set, frozen 2026-11-08. Phase 1 of the k-ladder on this dataset.
+#
+# WHY PRETRAINED, AND WHY 256. From scratch at 256 is DiffAE's own 200M-sample budget, ~96 days
+# on one A100. Starting from ffhq256_autoenc, 100% of the vanilla UNet loads. FFHQ is faces and
+# this is grayscale chest radiographs, so the transfer cannot be assumed -- it was measured on
+# 16 held-out CheXpert images with the untouched FFHQ weights and DiffAE's own 100-step
+# encode/decode:
+#       img_size 224   96.6% of weights load   38.08 dB PSNR   0.0098 MAE
+#       img_size 256   100%  of weights load   38.89 dB PSNR   0.0086 MAE
+# Both beat the 36.35 dB / 0.0224 that justified pretrained init for CelebA-HQ -- radiographs
+# are smoother than faces, so the FFHQ decoder reconstructs them more easily than it does the
+# domain it was trained on.
+#
+# 256 rather than the memmap's native 224 because at img_size 224 the UNet grows an EXTRA
+# decoder ResBlock, output_blocks.5.1 -- 12 tensors, 3.42% of parameters -- that ffhq256_autoenc
+# has no weights for. A randomly initialised block in the middle of an otherwise converged
+# decoder costs more than one bicubic resample, and 256 also keeps this arm architecturally
+# identical to the CelebA-HQ and Causal3DIdent 256 arms, so k-ladder comparisons across datasets
+# stay valid and registry.py's key-count check keeps working.
+#
+# Generated images come back at 256 and are scored by the frozen 224 predictors, so evaluation
+# downsamples 256 -> 224. The round trip is 224 -> 256 -> 224, both bicubic.
+base_template: ffhq256_autoenc
+data:
+  type: chexpert
+  image_size: 256
+  # A DIRECTORY, not a packed file: chexpert_meta.csv, split.npy, label_uncertainty.csv and
+  # images_224.npy are separate frozen artifacts whose mutual row alignment is the thing being
+  # protected. Packing them would also put a second copy of an 8.6 GB memmap on a disk with
+  # 13 GB free.
+  data_dir: /home/exouser/able_data/chexpert
+  n_val: 2048
+  # Protocol section 3 step 3: a modeled finding has to be certain. The frozen row set was
+  # filtered under v0 when edema was eval-only, so this is applied in the datamodule instead --
+  # 8,998 train rows with an uncertain edema label are dropped, the same 8,998 the SCM's
+  # mechanism fit excludes.
+  require_certain: [edema]
+  # NO flip_aug key. A chest radiograph is not left-right symmetric; train.py raises if this is
+  # ever set for chexpert.
+encoder:
+  type: hierarchical
+  # ONE tap at the bottleneck, 512 dims, feeding every decoder block the same latent. This is
+  # the vanilla DiffAE topology, so it is also the depth whose pretrained weights fit most
+  # naturally -- ffhq256_autoenc is itself a single 512-dim semantic vector.
+  #
+  # k=1 won the MorphoMNIST ladder outright (CC 0.9214 / CF1 0.8532 vs k=11's 0.8385 / 0.7822),
+  # reversing Causal3DIdent. The tap probe explained why: deeper ladders stored the conditioned
+  # attributes redundantly in every tap and each copy fought the intervention. Whether that
+  # holds on radiographs is what the ladder on this dataset exists to answer, and k=1 is the
+  # rung it starts from.
+  hier_tap_block_ids: [mid]
+  hier_level_dims: [512]
+  # 256px has eighteen decoder output blocks. All 18 map to the single level.
+  n_decoder_output_blocks: 18
+  hier_block_to_level: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+  n_attributes: 4
+  # The frozen v2 modeled set. Every one clears the radiologist gate (AUC >= .85, CI lo >= .80)
+  # on radiologist_val: sex .9945, age_bin .9523 [.930,.972], effusion .9049 [.858,.944],
+  # edema .9111 [.859,.944]. age_bin is a 3-class categorical, not a binary -- the first
+  # non-binary conditioned attribute in this project outside Causal3DIdent.
+  conditioning_attrs: [sex, age_bin, effusion, edema]
+  causal_graph_path: "able/datasets/chexpert/causal_graph_chexpert.yaml"
+  # 384 / 4 attributes = 96 per attribute under concat_film, the same per-attribute capacity
+  # CelebA-HQ graph A had and the quantity the MorphoMNIST sweep actually tuned.
+  attr_embed_dim: 384
+  attr_dropout_prob: 0.12
+  fourier_freqs: 16
+  fourier_max_freq: 1000.0
+  attr_norm: true
+  hier_proj: linear
+conditioning:
+  strategy: per_block_attr
+  style_ch: 512
+  latent_drop_prob: 0.0
+  cfg_drop_prob: 0.15
+  cfg_guidance_scale: 3.0
+  attr_fusion: concat_film
+train:
+  # 64 total, the same effective batch DiffAE used for ffhq256 and the same every other 256 arm
+  # here used -- but reached as 4 x 16 rather than CelebA's 8 x 8, because this GPU is a 20 GB
+  # vGPU slice and the CelebA runs had 40 GB. The model has 117 GroupNorm and ZERO BatchNorm
+  # layers, so no layer statistic depends on micro-batch size; only gradient noise does, and
+  # accumulation makes that identical to a true batch of 64.
+  batch_size_per_gpu: 4
+  accum_batches: 16
+  total_batch_size: 64
+  lr: 1.0e-4                   # DiffAE's own lr for this template; a fine-tune of mostly
+                               # converged weights, so not linearly scaled up.
+  ema_decay: 0.9999
+  T: 1000
+  T_eval: 100
+  # 15,625 optimiser steps x 64 = 1,000,000 samples. HALF of CelebA-HQ phase 1, chosen
+  # deliberately (2026-11-08): this is the first generative run on radiographs and the question
+  # it has to answer first is whether the conditioning takes at all, not where the optimum sits.
+  # At the measured 18.5 samples/s that is ~15 h. If the checkpoint curve is still climbing at
+  # the end, extend with init_from pointing at this run's last.ckpt -- the EMA carries over, and
+  # max_steps is ABSOLUTE on a continuation, so it would name 31,250, not another 15,625.
+  max_steps: 15625
+  # every 1,562 steps = 10 checkpoints across the shorter run, keeping the same density per run
+  # rather than per step. Dense on purpose: the MorphoMNIST 96,469-step run peaked at step
+  # 36,000 and then decayed monotonically for 60,000 more steps, and a single end-of-run
+  # checkpoint cannot see that. At 2.1 GB each these cannot all live on a disk with 14 GB free,
+  # so ckpt_janitor.sh runs alongside and prunes local copies only after verifying the s3 ETag.
+  checkpoint_every_n_steps: 1562
+  save_top_k: -1
+  log_images_every_n_epochs: 0
+  log_images_n: 8
+  precision: 16-mixed
+  grad_clip: 1.0
+  num_workers: 8
+  compile: false
+  use_checkpoint: true         # required at 256 inside 20 GB
+  init_from: "experiments/hdae/pretrained/ffhq256_autoenc_model.pt"
+lightning:
+  accelerator: gpu
+  devices: 1
+  strategy: auto
+  log_every_n_steps: 25
+  val_check_interval: 1.0
+seed: 42
+output_dir: experiments/hdae/outputs/chexpert256_k1

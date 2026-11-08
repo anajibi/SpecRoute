@@ -29,6 +29,7 @@ from experiments.hdae.data.datamodule import CelebAHQDataModule
 from experiments.hdae.data.morpho_datamodule import MorphoMNISTDataModule
 from experiments.hdae.data.causal3dident_datamodule import Causal3DIdentDataModule
 from able.datasets.shapes3d.datamodule import Shapes3DDataModule
+from able.datasets.chexpert.datamodule import CheXpertDataModule
 
 
 # --- Execution Logic Encapsulated ---
@@ -78,6 +79,21 @@ def main():
             print(f"[protocol] continuation: skipping {start:,} rows already consumed "
                   f"({start // per_step:,} steps), {(rows - start) // per_step:,} steps left, "
                   f"one pass = {steps:,} steps")
+    elif d.get('type') == 'chexpert':
+        dm = CheXpertDataModule(
+            d['data_dir'],
+            image_size=d['image_size'],
+            batch_size=t['batch_size_per_gpu'],
+            num_workers=t['num_workers'],
+            n_val=d.get('n_val', 2048),
+            require_certain=d.get('require_certain', ('edema',)),
+            seed=cfg.raw.get('seed', 0),
+        )
+        if d.get('flip_aug'):
+            raise ValueError(
+                "flip_aug is set for chexpert. A chest radiograph is not left-right symmetric -- "
+                "the heart sits left of midline and cardiomegaly is judged from that silhouette. "
+                "Mirroring would teach the model that situs inversus is ordinary. Remove the flag.")
     elif d.get('type') == 'causal3dident':
         dm = Causal3DIdentDataModule(
             d['h5_path'],

@@ -72,7 +72,12 @@ def load_hdae_config(path, require_data=True):
     conf.hdae_conf = hdae
     conf.make_model_conf()
     dtype = raw["data"].get("type")
-    data_key = "h5_path" if dtype in ("morphomnist", "causal3dident", "shapes3d") else "lmdb_path"
+    # CheXpert is addressed by a DIRECTORY, not a packed file: the frozen protocol artifacts
+    # (chexpert_meta.csv, split.npy, label_uncertainty.csv, images_224.npy) are separate files
+    # whose mutual row alignment is the thing being protected, and packing them into one blob
+    # would put a copy of an 8.6 GB memmap on a disk that has 13 GB free.
+    data_key = {"morphomnist": "h5_path", "causal3dident": "h5_path", "shapes3d": "h5_path",
+                "chexpert": "data_dir"}.get(dtype, "lmdb_path")
     if require_data and not Path(raw["data"][data_key]).exists():
         raise FileNotFoundError(
             f"Packed data missing. Run: python experiments/hdae/scripts/preprocess_data.py --config {path}")
