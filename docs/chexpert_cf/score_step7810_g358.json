@@ -1,0 +1,80 @@
+{
+  "global_step": 7810,
+  "n": 16,
+  "thresholds": {
+    "ours": 0.5174,
+    "xrv": 0.835837721824646
+  },
+  "readers": {
+    "ours10": {
+      "g3": {
+        "recon_correct": 14,
+        "pos_to_neg_ok": 2,
+        "n_pos": 5,
+        "neg_to_pos_ok": 2,
+        "n_neg": 11,
+        "freebie": 2,
+        "wrong_move": 0,
+        "hit": 6,
+        "real_flips": 4
+      },
+      "g5": {
+        "recon_correct": 14,
+        "pos_to_neg_ok": 2,
+        "n_pos": 5,
+        "neg_to_pos_ok": 2,
+        "n_neg": 11,
+        "freebie": 2,
+        "wrong_move": 0,
+        "hit": 6,
+        "real_flips": 4
+      },
+      "g8": {
+        "recon_correct": 14,
+        "pos_to_neg_ok": 1,
+        "n_pos": 5,
+        "neg_to_pos_ok": 3,
+        "n_neg": 11,
+        "freebie": 1,
+        "wrong_move": 1,
+        "hit": 5,
+        "real_flips": 4
+      }
+    },
+    "ours11": {
+      "g3": {
+        "recon_correct": 14,
+        "pos_to_neg_ok": 1,
+        "n_pos": 5,
+        "neg_to_pos_ok": 1,
+        "n_neg": 11,
+        "freebie": 2,
+        "wrong_move": 0,
+        "hit": 4,
+        "real_flips": 2
+      },
+      "g5": {
+        "recon_correct": 14,
+        "pos_to_neg_ok": 0,
+        "n_pos": 5,
+        "neg_to_pos_ok": 5,
+        "n_neg": 11,
+        "freebie": 2,
+        "wrong_move": 0,
+        "hit": 7,
+        "real_flips": 5
+      },
+      "g8": {
+        "recon_correct": 14,
+        "pos_to_neg_ok": 0,
+        "n_pos": 5,
+        "neg_to_pos_ok": 9,
+        "n_neg": 11,
+        "freebie": 1,
+        "wrong_move": 1,
+        "hit": 10,
+        "real_flips": 9
+      }
+    }
+  }
+}

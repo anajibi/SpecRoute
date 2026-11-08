@@ -1,0 +1,33 @@
+{
+  "thr": 0.835837721824646,
+  "global_step": 7810,
+  "by_g": {
+    "g3": {
+      "recon_correct": 13,
+      "pos_to_neg_ok": 0,
+      "neg_to_pos_ok": 4,
+      "real": 4,
+      "free": 0,
+      "wrong": 3,
+      "hit": 4
+    },
+    "g5": {
+      "recon_correct": 13,
+      "pos_to_neg_ok": 1,
+      "neg_to_pos_ok": 4,
+      "real": 5,
+      "free": 0,
+      "wrong": 3,
+      "hit": 5
+    },
+    "g8": {
+      "recon_correct": 13,
+      "pos_to_neg_ok": 2,
+      "neg_to_pos_ok": 0,
+      "real": 2,
+      "free": 3,
+      "wrong": 0,
+      "hit": 5
+    }
+  }
+}
