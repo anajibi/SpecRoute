@@ -1,0 +1,605 @@
+{
+  "reader": "torchxrayvision densenet121-res224-all",
+  "n_train_frontal": 191027,
+  "n_reference": 234,
+  "reference": "valid.csv, 234 images, radiologist-labelled",
+  "test_set": "not runnable: the 668-image test set's labels are public but its images are behind Stanford AIMI registration and are not in the Kaggle mirror, which carries train and valid only. The audit therefore has ONE reference set.",
+  "not_auditable": {
+    "Support Devices": "no XRV output; your own classifier only"
+  },
+  "labels": {
+    "Effusion": {
+      "csv_column": "Pleural Effusion",
+      "auc_vs_report_train": 0.9326,
+      "auc_vs_report_ci": [
+        0.9309,
+        0.9342
+      ],
+      "auc_vs_report_blank_as_negative": 0.8145,
+      "auc_vs_radiologist_valid": 0.8818,
+      "auc_vs_radiologist_ci": [
+        0.836,
+        0.9248
+      ],
+      "auc_vs_radiologist_test": null,
+      "gap": -0.0508,
+      "thresholds": {
+        "hi": 0.9631,
+        "lo": 0.4902
+      },
+      "confident_disagree_calibrated": 0.0103,
+      "radiologist_false_flag_rate_calibrated": 0.0128,
+      "excess_over_radiologist_baseline": -0.0025,
+      "fn_like_calibrated": 0.0231,
+      "fp_like_calibrated": 0.0061,
+      "model_error_floor_fixed_0.9_0.1": {
+        "confident_disagree_train": 0.0251,
+        "radiologist_false_flag_rate": 0.094,
+        "fn_like": 0.099,
+        "fp_like": 0.0008,
+        "note": "the radiologist rate here is the reader's own error, not label error"
+      },
+      "uncertain_frac": 0.052,
+      "blank_frac": 0.4037,
+      "positive_frac": 0.3858,
+      "n_reference_positives": 67,
+      "estimable": true,
+      "flag": null,
+      "verdict": "clean",
+      "gap_blank_as_negative": 0.0673,
+      "verdict_blank_as_negative": "noisy"
+    },
+    "Cardiomegaly": {
+      "csv_column": "Cardiomegaly",
+      "auc_vs_report_train": 0.9037,
+      "auc_vs_report_ci": [
+        0.8997,
+        0.9081
+      ],
+      "auc_vs_report_blank_as_negative": 0.779,
+      "auc_vs_radiologist_valid": 0.8199,
+      "auc_vs_radiologist_ci": [
+        0.7559,
+        0.8731
+      ],
+      "auc_vs_radiologist_test": null,
+      "gap": -0.0838,
+      "thresholds": {
+        "hi": 0.943,
+        "lo": 0.2895
+      },
+      "confident_disagree_calibrated": 0.0104,
+      "radiologist_false_flag_rate_calibrated": 0.0128,
+      "excess_over_radiologist_baseline": -0.0024,
+      "fn_like_calibrated": 0.0169,
+      "fp_like_calibrated": 0.0082,
+      "model_error_floor_fixed_0.9_0.1": {
+        "confident_disagree_train": 0.0132,
+        "radiologist_false_flag_rate": 0.0256,
+        "fn_like": 0.0445,
+        "fp_like": 0.0027,
+        "note": "the radiologist rate here is the reader's own error, not label error"
+      },
+      "uncertain_frac": 0.0362,
+      "blank_frac": 0.7932,
+      "positive_frac": 0.1209,
+      "n_reference_positives": 68,
+      "estimable": true,
+      "flag": null,
+      "verdict": "clean",
+      "gap_blank_as_negative": 0.0409,
+      "verdict_blank_as_negative": "clean"
+    },
+    "Edema": {
+      "csv_column": "Edema",
+      "auc_vs_report_train": 0.8678,
+      "auc_vs_report_ci": [
+        0.8652,
+        0.8714
+      ],
+      "auc_vs_report_blank_as_negative": 0.7805,
+      "auc_vs_radiologist_valid": 0.8536,
+      "auc_vs_radiologist_ci": [
+        0.791,
+        0.91
+      ],
+      "auc_vs_radiologist_test": null,
+      "gap": -0.0142,
+      "thresholds": {
+        "hi": 0.9288,
+        "lo": 0.5564
+      },
+      "confident_disagree_calibrated": 0.0173,
+      "radiologist_false_flag_rate_calibrated": 0.0128,
+      "excess_over_radiologist_baseline": 0.0045,
+      "fn_like_calibrated": 0.0336,
+      "fp_like_calibrated": 0.0121,
+      "model_error_floor_fixed_0.9_0.1": {
+        "confident_disagree_train": 0.0173,
+        "radiologist_false_flag_rate": 0.0342,
+        "fn_like": 0.0706,
+        "fp_like": 0.0003,
+        "note": "the radiologist rate here is the reader's own error, not label error"
+      },
+      "uncertain_frac": 0.0581,
+      "blank_frac": 0.6153,
+      "positive_frac": 0.2339,
+      "n_reference_positives": 45,
+      "estimable": true,
+      "flag": null,
+      "verdict": "clean",
+      "gap_blank_as_negative": 0.0731,
+      "verdict_blank_as_negative": "noisy"
+    },
+    "Consolidation": {
+      "csv_column": "Consolidation",
+      "auc_vs_report_train": 0.9351,
+      "auc_vs_report_ci": [
+        0.9324,
+        0.9375
+      ],
+      "auc_vs_report_blank_as_negative": 0.6966,
+      "auc_vs_radiologist_valid": 0.8954,
+      "auc_vs_radiologist_ci": [
+        0.8522,
+        0.937
+      ],
+      "auc_vs_radiologist_test": null,
+      "gap": -0.0397,
+      "thresholds": {
+        "hi": 0.9332,
+        "lo": 0.7161
+      },
+      "confident_disagree_calibrated": 0.0656,
+      "radiologist_false_flag_rate_calibrated": 0.0128,
+      "excess_over_radiologist_baseline": 0.0528,
+      "fn_like_calibrated": 0.004,
+      "fp_like_calibrated": 0.1587,
+      "model_error_floor_fixed_0.9_0.1": {
+        "confident_disagree_train": 0.007,
+        "radiologist_false_flag_rate": 0.0342,
+        "fn_like": 0.0105,
+        "fp_like": 0.0018,
+        "note": "the radiologist rate here is the reader's own error, not label error"
+      },
+      "uncertain_frac": 0.1242,
+      "blank_frac": 0.6839,
+      "positive_frac": 0.0662,
+      "n_reference_positives": 33,
+      "estimable": true,
+      "flag": null,
+      "verdict": "noisy",
+      "gap_blank_as_negative": 0.1988,
+      "verdict_blank_as_negative": "unreliable"
+    },
+    "Lung Opacity": {
+      "csv_column": "Lung Opacity",
+      "auc_vs_report_train": 0.8469,
+      "auc_vs_report_ci": [
+        0.8418,
+        0.8529
+      ],
+      "auc_vs_report_blank_as_negative": 0.6896,
+      "auc_vs_radiologist_valid": 0.8787,
+      "auc_vs_radiologist_ci": [
+        0.8339,
+        0.9208
+      ],
+      "auc_vs_radiologist_test": null,
+      "gap": 0.0318,
+      "thresholds": {
+        "hi": 0.9548,
+        "lo": 0.6091
+      },
+      "confident_disagree_calibrated": 0.0341,
+      "radiologist_false_flag_rate_calibrated": 0.0171,
+      "excess_over_radiologist_baseline": 0.017,
+      "fn_like_calibrated": 0.059,
+      "fp_like_calibrated": 0.0327,
+      "model_error_floor_fixed_0.9_0.1": {
+        "confident_disagree_train": 0.0095,
+        "radiologist_false_flag_rate": 0.0342,
+        "fn_like": 0.1788,
+        "fp_like": 0.0004,
+        "note": "the radiologist rate here is the reader's own error, not label error"
+      },
+      "uncertain_frac": 0.0251,
+      "blank_frac": 0.4728,
+      "positive_frac": 0.4726,
+      "n_reference_positives": 126,
+      "estimable": true,
+      "flag": null,
+      "verdict": "clean",
+      "gap_blank_as_negative": 0.1891,
+      "verdict_blank_as_negative": "unreliable"
+    },
+    "Atelectasis": {
+      "csv_column": "Atelectasis",
+      "auc_vs_report_train": 0.7115,
+      "auc_vs_report_ci": [
+        0.6923,
+        0.7286
+      ],
+      "auc_vs_report_blank_as_negative": 0.5976,
+      "auc_vs_radiologist_valid": 0.8141,
+      "auc_vs_radiologist_ci": [
+        0.758,
+        0.8717
+      ],
+      "auc_vs_radiologist_test": null,
+      "gap": 0.1026,
+      "thresholds": {
+        "hi": 0.9562,
+        "lo": 0.589
+      },
+      "confident_disagree_calibrated": 0.0348,
+      "radiologist_false_flag_rate_calibrated": 0.0128,
+      "excess_over_radiologist_baseline": 0.022,
+      "fn_like_calibrated": 0.0449,
+      "fp_like_calibrated": 0.0344,
+      "model_error_floor_fixed_0.9_0.1": {
+        "confident_disagree_train": 0.0071,
+        "radiologist_false_flag_rate": 0.0812,
+        "fn_like": 0.202,
+        "fp_like": 0.0004,
+        "note": "the radiologist rate here is the reader's own error, not label error"
+      },
+      "uncertain_frac": 0.151,
+      "blank_frac": 0.6936,
+      "positive_frac": 0.1494,
+      "n_reference_positives": 80,
+      "estimable": true,
+      "flag": null,
+      "verdict": "noisy",
+      "gap_blank_as_negative": 0.2165,
+      "verdict_blank_as_negative": "unreliable"
+    },
+    "Pneumothorax": {
+      "csv_column": "Pneumothorax",
+      "auc_vs_report_train": 0.7448,
+      "auc_vs_report_ci": [
+        0.7409,
+        0.7493
+      ],
+      "auc_vs_report_blank_as_negative": 0.7277,
+      "auc_vs_radiologist_valid": 0.6477,
+      "auc_vs_radiologist_ci": [
+        0.5141,
+        0.787
+      ],
+      "auc_vs_radiologist_test": null,
+      "gap": -0.0971,
+      "thresholds": {
+        "hi": 0.7106,
+        "lo": 0.5217
+      },
+      "confident_disagree_calibrated": 0.0351,
+      "radiologist_false_flag_rate_calibrated": 0.0171,
+      "excess_over_radiologist_baseline": null,
+      "fn_like_calibrated": 0.0146,
+      "fp_like_calibrated": 0.0905,
+      "model_error_floor_fixed_0.9_0.1": {
+        "confident_disagree_train": 0.0001,
+        "radiologist_false_flag_rate": 0.0,
+        "fn_like": 0.0,
+        "fp_like": 0.0002,
+        "note": "the radiologist rate here is the reader's own error, not label error"
+      },
+      "uncertain_frac": 0.0141,
+      "blank_frac": 0.6467,
+      "positive_frac": 0.087,
+      "n_reference_positives": 8,
+      "estimable": false,
+      "flag": "not auditable with XRV (n=8 positives in valid)",
+      "verdict": "not auditable",
+      "gap_blank_as_negative": -0.08,
+      "verdict_blank_as_negative": "not auditable"
+    },
+    "Lung Lesion": {
+      "csv_column": "Lung Lesion",
+      "auc_vs_report_train": 0.7616,
+      "auc_vs_report_ci": [
+        0.7454,
+        0.778
+      ],
+      "auc_vs_report_blank_as_negative": 0.6133,
+      "auc_vs_radiologist_valid": 0.1974,
+      "auc_vs_radiologist_ci": [
+        0.1502,
+        0.2506
+      ],
+      "auc_vs_radiologist_test": null,
+      "gap": -0.5642,
+      "thresholds": {
+        "hi": 0.9522,
+        "lo": 0.5176
+      },
+      "confident_disagree_calibrated": 0.0658,
+      "radiologist_false_flag_rate_calibrated": 0.0128,
+      "excess_over_radiologist_baseline": null,
+      "fn_like_calibrated": 0.0116,
+      "fp_like_calibrated": 0.0717,
+      "model_error_floor_fixed_0.9_0.1": {
+        "confident_disagree_train": 0.0041,
+        "radiologist_false_flag_rate": 0.0513,
+        "fn_like": 0.0219,
+        "fp_like": 0.0021,
+        "note": "the radiologist rate here is the reader's own error, not label error"
+      },
+      "uncertain_frac": 0.0067,
+      "blank_frac": 0.9465,
+      "positive_frac": 0.0411,
+      "n_reference_positives": 1,
+      "estimable": false,
+      "flag": "not auditable with XRV (n=1 positives in valid)",
+      "verdict": "not auditable",
+      "gap_blank_as_negative": -0.4159,
+      "verdict_blank_as_negative": "not auditable"
+    },
+    "Fracture": {
+      "csv_column": "Fracture",
+      "auc_vs_report_train": 0.6805,
+      "auc_vs_report_ci": [
+        0.6683,
+        0.6948
+      ],
+      "auc_vs_report_blank_as_negative": 0.5295,
+      "auc_vs_radiologist_valid": null,
+      "auc_vs_radiologist_ci": [
+        null,
+        null
+      ],
+      "auc_vs_radiologist_test": null,
+      "gap": null,
+      "thresholds": {
+        "hi": 0.8654,
+        "lo": 0.1
+      },
+      "confident_disagree_calibrated": 0.0028,
+      "radiologist_false_flag_rate_calibrated": 0.0128,
+      "excess_over_radiologist_baseline": null,
+      "fn_like_calibrated": 0.013,
+      "fp_like_calibrated": 0.0,
+      "model_error_floor_fixed_0.9_0.1": {
+        "confident_disagree_train": 0.0013,
+        "radiologist_false_flag_rate": 0.0,
+        "fn_like": 0.006,
+        "fp_like": 0.0,
+        "note": "the radiologist rate here is the reader's own error, not label error"
+      },
+      "uncertain_frac": 0.0029,
+      "blank_frac": 0.9454,
+      "positive_frac": 0.0405,
+      "n_reference_positives": 0,
+      "estimable": false,
+      "flag": "not auditable with XRV (n=0 positives in valid)",
+      "verdict": "not auditable",
+      "gap_blank_as_negative": null,
+      "verdict_blank_as_negative": "not auditable"
+    },
+    "Enlarged Cardiomediastinum": {
+      "csv_column": "Enlarged Cardiomediastinum",
+      "auc_vs_report_train": 0.8453,
+      "auc_vs_report_ci": [
+        0.8413,
+        0.8498
+      ],
+      "auc_vs_report_blank_as_negative": 0.5814,
+      "auc_vs_radiologist_valid": 0.8394,
+      "auc_vs_radiologist_ci": [
+        0.7857,
+        0.8893
+      ],
+      "auc_vs_radiologist_test": null,
+      "gap": -0.0059,
+      "thresholds": {
+        "hi": 0.8592,
+        "lo": 0.5138
+      },
+      "confident_disagree_calibrated": 0.0309,
+      "radiologist_false_flag_rate_calibrated": 0.0171,
+      "excess_over_radiologist_baseline": 0.0138,
+      "fn_like_calibrated": 0.0167,
+      "fp_like_calibrated": 0.0546,
+      "model_error_floor_fixed_0.9_0.1": {
+        "confident_disagree_train": 0.0051,
+        "radiologist_false_flag_rate": 0.0,
+        "fn_like": 0.0076,
+        "fp_like": 0.001,
+        "note": "the radiologist rate here is the reader's own error, not label error"
+      },
+      "uncertain_frac": 0.0555,
+      "blank_frac": 0.7993,
+      "positive_frac": 0.0483,
+      "n_reference_positives": 109,
+      "estimable": true,
+      "flag": null,
+      "verdict": "clean",
+      "gap_blank_as_negative": 0.258,
+      "verdict_blank_as_negative": "unreliable"
+    }
+  },
+  "age": {
+    "mae_years": 8.37,
+    "bias_years": -1.34,
+    "n": 191024,
+    "bin_confusion_rows_true_cols_pred": [
+      [
+        20890,
+        14562,
+        157
+      ],
+      [
+        3514,
+        57911,
+        13150
+      ],
+      [
+        511,
+        24258,
+        56071
+      ]
+    ],
+    "bin_accuracy": 0.706,
+    "note": "sanity only; age labels do not come from reports"
+  },
+  "S6": {
+    "1_valid_vs_test_agreement": {
+      "pass": null,
+      "note": "not runnable: the 668-image test set's labels are public but its images are behind Stanford AIMI registration and are not in the Kaggle mirror, which carries train and valid only. The audit therefore has ONE reference set."
+    },
+    "2_ordering": {
+      "by_gap": [
+        "Atelectasis",
+        "Lung Opacity",
+        "Enlarged Cardiomediastinum",
+        "Edema",
+        "Consolidation",
+        "Effusion",
+        "Cardiomegaly"
+      ],
+      "by_confident_disagree": [
+        "Consolidation",
+        "Atelectasis",
+        "Lung Opacity",
+        "Enlarged Cardiomediastinum",
+        "Edema",
+        "Cardiomegaly",
+        "Effusion"
+      ],
+      "rank_shift_ge_3": [
+        "Consolidation"
+      ],
+      "uncertain_ge_positive": [
+        "Consolidation",
+        "Atelectasis",
+        "Enlarged Cardiomediastinum"
+      ],
+      "pass": false,
+      "note": "the two orderings should broadly agree; a label high on one and low on the other is flagged rather than averaged away"
+    },
+    "3_radiologist_false_flag": {
+      "calibrated": {
+        "Effusion": 0.0128,
+        "Cardiomegaly": 0.0128,
+        "Edema": 0.0128,
+        "Consolidation": 0.0128,
+        "Lung Opacity": 0.0171,
+        "Atelectasis": 0.0128,
+        "Pneumothorax": 0.0171,
+        "Lung Lesion": 0.0128,
+        "Fracture": 0.0128,
+        "Enlarged Cardiomediastinum": 0.0171
+      },
+      "fixed_0.9_0.1": {
+        "Effusion": 0.094,
+        "Cardiomegaly": 0.0256,
+        "Edema": 0.0342,
+        "Consolidation": 0.0342,
+        "Lung Opacity": 0.0342,
+        "Atelectasis": 0.0812,
+        "Pneumothorax": 0.0,
+        "Lung Lesion": 0.0513,
+        "Fracture": 0.0,
+        "Enlarged Cardiomediastinum": 0.0
+      },
+      "pass": true,
+      "note": "fixed thresholds fail this for six of eight labels, which is why they are reported only as a model-error floor"
+    },
+    "4_chex_control": {
+      "per_label": {
+        "Effusion": {
+          "report_all": 0.9326,
+          "report_chex": 0.9151,
+          "report_chex_higher": false,
+          "radiologist_all": 0.8818,
+          "radiologist_chex": 0.8165,
+          "radiologist_chex_not_better": true
+        },
+        "Cardiomegaly": {
+          "report_all": 0.9037,
+          "report_chex": 0.8956,
+          "report_chex_higher": false,
+          "radiologist_all": 0.8199,
+          "radiologist_chex": 0.8111,
+          "radiologist_chex_not_better": true
+        },
+        "Edema": {
+          "report_all": 0.8678,
+          "report_chex": 0.8499,
+          "report_chex_higher": false,
+          "radiologist_all": 0.8536,
+          "radiologist_chex": 0.8178,
+          "radiologist_chex_not_better": true
+        },
+        "Consolidation": {
+          "report_all": 0.9351,
+          "report_chex": 0.9203,
+          "report_chex_higher": false,
+          "radiologist_all": 0.8954,
+          "radiologist_chex": 0.8601,
+          "radiologist_chex_not_better": true
+        },
+        "Lung Opacity": {
+          "report_all": 0.8469,
+          "report_chex": 0.8284,
+          "report_chex_higher": false,
+          "radiologist_all": 0.8787,
+          "radiologist_chex": 0.8455,
+          "radiologist_chex_not_better": true
+        },
+        "Atelectasis": {
+          "report_all": 0.7115,
+          "report_chex": 0.6975,
+          "report_chex_higher": false,
+          "radiologist_all": 0.8141,
+          "radiologist_chex": 0.8062,
+          "radiologist_chex_not_better": true
+        },
+        "Pneumothorax": {
+          "report_all": 0.7448,
+          "report_chex": 0.7197,
+          "report_chex_higher": false,
+          "radiologist_all": 0.6477,
+          "radiologist_chex": 0.6958,
+          "radiologist_chex_not_better": false
+        },
+        "Lung Lesion": {
+          "report_all": 0.7616,
+          "report_chex": 0.6968,
+          "report_chex_higher": false,
+          "radiologist_all": 0.1974,
+          "radiologist_chex": 0.3047,
+          "radiologist_chex_not_better": false
+        },
+        "Fracture": {
+          "report_all": 0.6805,
+          "report_chex": 0.6597,
+          "report_chex_higher": false,
+          "radiologist_all": null,
+          "radiologist_chex": null,
+          "radiologist_chex_not_better": null
+        },
+        "Enlarged Cardiomediastinum": {
+          "report_all": 0.8453,
+          "report_chex": 0.8331,
+          "report_chex_higher": false,
+          "radiologist_all": 0.8394,
+          "radiologist_chex": 0.8165,
+          "radiologist_chex_not_better": true
+        }
+      },
+      "report_higher_count": 0,
+      "n_report": 10,
+      "radiologist_not_better_count": 7,
+      "n_radiologist": 9,
+      "pass": false,
+      "note": "densenet121-res224-chex learned these very report labels. If the gap is label noise it should beat -all against the reports and not against the radiologists."
+    }
+  },
+  "gap_definitions": {
+    "gap": "AUC(radiologist, all 234) - AUC(report, rows with an explicit 0 or 1). The report side here is restricted to rows where the labeller named the finding, which are the unambiguous ones, so this comparison favours the report side.",
+    "gap_blank_as_negative": "AUC(radiologist, all 234) - AUC(report, ALL frontal rows with blank treated as negative). Both sides then score every image, and this is the convention the protocol uses for eval-only labels. This is the comparable number."
+  },
+  "independence_caveat": "densenet121-res224-all was trained on NIH + PadChest + CheXpert + MIMIC + RSNA. Its CheXpert component was trained on these very report labels, so the reader is only partly independent of the thing being audited, and AUC-against-report is biased upward. That bias pushes the literal gap negative and is the likeliest reason it comes out so."
+}

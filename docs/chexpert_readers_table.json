@@ -1,0 +1,151 @@
+{
+  "what": "three readers vs radiologist labels on radiologist_val (200 frontal images)",
+  "date": "2026-11-08",
+  "status": "MEASUREMENT ONLY -- the frozen v2 modeled and eval-only sets are unchanged",
+  "gate_for_reference": "radiologist_val AUC >= 0.85 and 95% bootstrap CI lower bound >= 0.80",
+  "bootstrap": "2000 resamples, percentile CI, seed 7, identical procedure for every reader",
+  "readers": {
+    "xrv_densenet121_res224_all": "TorchXRayVision densenet121-res224-all. NOT independent of CheXpert: its training mix includes CheXpert, so it partly learned these report labels. No Support Devices output at all. Scored from valid_xrv_probs.npy, subset to the same 200.",
+    "chexzero_zeroshot_ensemble": "CheXzero (rajpurkarlab/CheXzero), zero-shot, 10-checkpoint ensemble, prompt pair ('{}','no {}'). Trained on MIMIC-CXR report TEXT, not on CheXpert and not on any label column -- the most independent reader here. Gate on its five competition pathologies: mean AUC 0.8672, min 0.7845, so the pipeline is sound. Input deviation: scored on radiologist_val_224.npy (resize-short-side-224 + 224 centre crop), not CheXzero's letterbox-to-320-then-224. The source JPEGs are gone with the deleted archive. Identical pixels to this project's own classifier, so the comparison is controlled on input.",
+    "ours_best_ckpt_10head": "the FROZEN v2 predictor. Unchanged, sha256 verified.",
+    "ours_11head_measurement": "same architecture, recipe, split and seed, with an 11th binary head for enlarged_cardiomediastinum. Trained for this measurement; NOT part of the protocol. Trunk disturbance vs best.ckpt: mean |delta| 0.0097, max 0.0442, so the ten shared heads barely moved and the new head's number is comparable."
+  },
+  "table": {
+    "cardiomegaly": {
+      "xrv_densenet121_res224_all": {
+        "auc": 0.8063,
+        "ci95": [
+          0.7414,
+          0.8634
+        ]
+      },
+      "chexzero_zeroshot_ensemble": {
+        "auc": 0.8544,
+        "ci95": [
+          0.7973,
+          0.9041
+        ]
+      },
+      "ours_best_ckpt_10head": {
+        "auc": 0.808,
+        "ci95": [
+          0.7376,
+          0.8684
+        ]
+      },
+      "ours_11head_measurement": {
+        "auc": 0.8155,
+        "ci95": [
+          0.748,
+          0.8745
+        ]
+      },
+      "n_pos_radiologist_val": 66
+    },
+    "enlarged_cardiomediastinum": {
+      "xrv_densenet121_res224_all": {
+        "auc": 0.8292,
+        "ci95": [
+          0.7669,
+          0.8835
+        ]
+      },
+      "chexzero_zeroshot_ensemble": {
+        "auc": 0.916,
+        "ci95": [
+          0.8763,
+          0.9497
+        ]
+      },
+      "ours_best_ckpt_10head": null,
+      "ours_11head_measurement": {
+        "auc": 0.5533,
+        "ci95": [
+          0.4699,
+          0.6331
+        ]
+      },
+      "n_pos_radiologist_val": 105
+    },
+    "support_devices": {
+      "xrv_densenet121_res224_all": null,
+      "chexzero_zeroshot_ensemble": {
+        "auc": 0.7855,
+        "ci95": [
+          0.7181,
+          0.845
+        ]
+      },
+      "ours_best_ckpt_10head": {
+        "auc": 0.8483,
+        "ci95": [
+          0.7934,
+          0.8968
+        ]
+      },
+      "ours_11head_measurement": {
+        "auc": 0.827,
+        "ci95": [
+          0.7672,
+          0.882
+        ]
+      },
+      "n_pos_radiologist_val": 99
+    }
+  },
+  "support_devices_error_breakdown": {
+    "threshold_youden_on_select": {
+      "threshold": 0.4386,
+      "tp": 64,
+      "fp": 17,
+      "fn": 35,
+      "tn": 84,
+      "errors": 52,
+      "false_negatives_device_present_predicted_absent": 35,
+      "fn_share_of_errors": 0.6731,
+      "tpr": 0.6465,
+      "fpr": 0.1683,
+      "accuracy": 0.74
+    },
+    "threshold_half": {
+      "threshold": 0.5,
+      "tp": 60,
+      "fp": 12,
+      "fn": 39,
+      "tn": 89,
+      "errors": 51,
+      "false_negatives_device_present_predicted_absent": 39,
+      "fn_share_of_errors": 0.7647,
+      "tpr": 0.6061,
+      "fpr": 0.1188,
+      "accuracy": 0.745
+    },
+    "answer": "35 of 52 errors (67%) are false negatives -- device present, predicted absent -- at the protocol's Youden threshold; 39 of 51 (76%) at 0.5. The head is under-sensitive, not over-eager.",
+    "plumbing_check": "report_vs_radiologist_disagree is 0 by construction -- radiologist_val's label column IS valid.csv's radiologist label, so this only confirms the label join is correct; it measures no noise."
+  },
+  "prevalence_mismatch_report_label_vs_radiologist": {
+    "enlarged_cardiomediastinum": {
+      "train_report_blank_to_zero": 0.0477,
+      "radiologist_val": 0.525,
+      "ratio": 11.0
+    },
+    "cardiomegaly": {
+      "train_report_blank_to_zero": 0.1261,
+      "radiologist_val": 0.33,
+      "ratio": 2.62
+    },
+    "support_devices": {
+      "train_report_blank_to_zero": 0.5674,
+      "radiologist_val": 0.495,
+      "ratio": 0.87
+    }
+  },
+  "cardiomegaly_is_a_strict_subset_of_enlarged_cardiomediastinum_on_radiologist_val": {
+    "ec_pos": 105,
+    "cm_pos": 66,
+    "ec1_cm1": 66,
+    "ec1_cm0": 39,
+    "ec0_cm1": 0,
+    "phi": 0.6676
+  }
+}
