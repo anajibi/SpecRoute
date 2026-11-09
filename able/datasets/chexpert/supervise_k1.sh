@@ -32,9 +32,29 @@ crashes=0; nonfinite=0
 
 say () { echo "[$(date -u +%FT%TZ)] $*" | tee -a "$SUP"; }
 
-newest_step () {   # highest global_step among local checkpoints, 0 if none
-  ls -1 "$OUT"/checkpoints/*.ckpt 2>/dev/null \
-    | grep -oE 'step=[0-9]+' | grep -oE '[0-9]+' | sort -n | tail -1
+newest_step () {   # highest global_step reached, 0 if unknown
+  # Filenames alone are NOT enough. The janitor now prunes every verified epoch=*.ckpt to
+  # keep the disk alive, so the only local checkpoint left can be last.ckpt -- which carries
+  # no step in its name. Reading the name only would report 0 on a COMPLETED run and the
+  # supervisor would restart it. So: try the names, then fall back to the step stored inside
+  # last.ckpt, then to s3, which holds every checkpoint ever written.
+  local n
+  n=$(ls -1 "$OUT"/checkpoints/epoch=*.ckpt 2>/dev/null \
+      | grep -oE 'step=[0-9]+' | grep -oE '[0-9]+' | sort -n | tail -1)
+  if [ -z "${n:-}" ] && [ -f "$OUT/checkpoints/last.ckpt" ]; then
+    n=$("$PY" -c "
+import torch,sys
+try:
+    print(int(torch.load(sys.argv[1], map_location='cpu', weights_only=False).get('global_step', 0)))
+except Exception:
+    print(0)
+" "$OUT/checkpoints/last.ckpt" 2>/dev/null)
+  fi
+  if [ -z "${n:-}" ] || [ "${n:-0}" = "0" ]; then
+    n=$(aws s3 ls "s3://najibi-research-7f2a/able/chexpert/v2/hdae/k1/" 2>/dev/null \
+        | grep -oE 'step=[0-9]+' | grep -oE '[0-9]+' | sort -n | tail -1)
+  fi
+  echo "${n:-0}"
 }
 
 nonfinite_in_log () {
