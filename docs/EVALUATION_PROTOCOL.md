@@ -1,10 +1,11 @@
 # Counterfactual Evaluation Protocol
 
-Dataset-independent. Working sets: **CelebA-HQ 256px**, **Causal3DIdent 128px**.
-Rationale, measurements and failure cases: `EVALUATION_RATIONALE.md`.
+Dataset-independent and **model-independent**: nothing here is specific to any generator. Any
+model that can produce a counterfactual image from a source and a target attribute vector is
+evaluable under it.
 
-Supersedes `cc_from_error` in `able/adapters/base.py`. FC and CF1 follow
-`able/shared/metrics.py`.
+Working sets: **CelebA-HQ 256px**, **Causal3DIdent 128px**.
+Rationale, measurements and failure cases: `EVALUATION_RATIONALE.md`.
 
 ---
 
@@ -171,7 +172,8 @@ spline (test NLL 5.2910) over gaussian (5.8832).
 An SCM checkpoint must record its own architecture. The cohort header records which SCM built
 it; a mismatch at evaluation time invalidates the targets.
 
-Loader and verification: `able/shared/scm_registry.py`.
+The SCM is a property of the **dataset and graph**, not of the model under test: every model
+evaluated on a dataset uses the same SCM, so their targets are identical.
 
 ---
 
@@ -192,7 +194,50 @@ Identity preservation is deliberately not measured.
 
 ---
 
-## 8. Reporting contract
+## 8. Run configuration
+
+### 8.1 Guidance
+
+Reported as a curve, never at one operating point. Grid:
+
+```
+g in {1, 2, 3, 5, 8}
+```
+
+`g = 1` is the no-guidance control; 2–5 spans where CF1 has peaked historically; 8 shows the
+degradation knee. A model whose CC rises while FC falls across this grid is trading image
+integrity for attribute movement, which a single operating point hides.
+
+Where a per-attribute best-g is reported, it is selected **on the curve**, not assumed, and the
+whole curve is published alongside it.
+
+### 8.2 Diffusion steps
+
+```
+T = 100
+```
+
+Measured reconstruction quality against step count: T=20 → PSNR 26.35, T=50 → 30.48,
+T=100 → 32.26, at 0.40 / 0.99 / 1.98 s per image. T=100 costs 2x T=50 for 1.8 dB. Since
+`e_floor` is derived from reconstructions and bounds every CC, the protocol pays for it.
+
+### 8.3 Seeding
+
+One fixed seed per run, recorded. Counterfactuals are deterministic given DDIM inversion and a
+fixed seed; no repeat runs and no cross-seed aggregation.
+
+### 8.4 Generated images are retained
+
+All generated images are kept — source reconstruction and every counterfactual at every
+guidance value — not only the scores derived from them.
+
+A new reader, a new perceptual metric or a re-scored threshold then costs nothing. Discarding
+them makes every later question a full regeneration. Retained as uint8 arrays beside the cohort
+that produced them, with the run configuration (§8.1–8.3) in the header.
+
+---
+
+## 9. Reporting contract
 
 `CC`, `fc_obs`, `fc_unobs`, `cf1` are reported **per attribute, unaggregated**, in addition to
 any mean.
