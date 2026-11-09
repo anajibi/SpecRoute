@@ -66,15 +66,40 @@ def main():
     ap.add_argument("--scm", default="experiments/hdae/outputs/scm/causal3dident_scm.pt")
     ap.add_argument("--out", default="outputs/cohorts/causal3dident")
     ap.add_argument("--seed", type=int, default=20261109)
+    ap.add_argument("--n-test", type=int, default=5000,
+                    help="stratified subsample of the 25,200 test rows, balanced across the "
+                         "7 classes. 0 uses every row.")
     a = ap.parse_args()
     os.makedirs(a.out, exist_ok=True)
     rng = np.random.default_rng(a.seed)
 
-    Xte, Cte = load_split(a.root, "testset")
+    Xte_full, Cte_full = load_split(a.root, "testset")
     Xtr, Ctr = load_split(a.root, "trainset")
-    Xall, Call = np.concatenate([Xtr, Xte]), np.concatenate([Ctr, Cte])
+    # Support is referenced against EVERY rendered row, not the subsample: the question
+    # "is this value attested for this class" is a property of the dataset, not of how many
+    # sources we happened to draw.
+    Xall, Call = np.concatenate([Xtr, Xte_full]), np.concatenate([Ctr, Cte_full])
+
+    # Stratified subsample, balanced across the 7 classes. The classes are exactly equal in
+    # the test set (3,600 each), so a balanced draw is also a uniform one; taking the first
+    # n rows instead would silently take them all from class 0.
+    if a.n_test and a.n_test < len(Xte_full):
+        rs = np.random.default_rng(a.seed)
+        base, rem = divmod(a.n_test, N_CLASS)
+        sel = []
+        for c in range(N_CLASS):
+            rows_c = np.flatnonzero(Cte_full == c)
+            k = base + (1 if c < rem else 0)
+            sel.append(rs.choice(rows_c, k, replace=False))
+        sel = np.sort(np.concatenate(sel))
+        src_rows = sel
+    else:
+        src_rows = np.arange(len(Xte_full))
+    Xte, Cte = Xte_full[src_rows], Cte_full[src_rows]
     n = len(Xte)
-    print(f"test rows {n:,}   support reference {len(Xall):,} (train+test)")
+    per_class = np.bincount(Cte, minlength=N_CLASS).tolist()
+    print(f"test pool {len(Xte_full):,} -> cohort sources {n:,}  per class {per_class}")
+    print(f"support reference {len(Xall):,} (train+test, full)")
 
     # class-conditional support, per conditioned continuous column
     sup = {c: {j: (Xall[Call == c, j].min(), Xall[Call == c, j].max())
@@ -118,7 +143,7 @@ def main():
                  for nm in CONDITIONED}
         np.savez_compressed(
             os.path.join(a.out, f"do_{attr}.npz"),
-            row=np.arange(n)[keep], factual_class=Cte[keep],
+            row=src_rows[keep], factual_class=Cte[keep],
             factual=Xte[keep], target_class_idx=cls_post[keep],
             **{f"target_{nm}": cf[nm][keep] for nm in CONDITIONED},
             unmodeled=Xte[:, [COLS[u][0] for u in UNMODELED]][keep], admitted=keep[keep])
@@ -126,7 +151,11 @@ def main():
                          "moved_counts": moved}
         print(f"  do({attr:8s}) admitted {int(keep.sum()):6d}/{n}  excluded {int((~keep).sum()):5d}   moved {moved}")
 
-    hdr = {"dataset": "causal3dident128", "n_test": n, "seed": a.seed,
+    hdr = {"dataset": "causal3dident128", "n_test_pool": int(len(Xte_full)),
+           "n_sources": n, "sources_per_class": per_class,
+           "sampling": ("stratified, balanced across the 7 classes; `row` indexes the full "
+                        "25,200-row test set so a source is always identifiable"),
+           "seed": a.seed,
            "conditioned": CONDITIONED, "unmodeled_fc_pool": UNMODELED,
            "latent_columns": COLS, "class_names": ["teapot","hare","dragon","cow","armadillo","horse","head"],
            "value_space": "raw latents, every column bounded to [-1,1]; [-1,1] maps to [-pi,pi] for angular factors",

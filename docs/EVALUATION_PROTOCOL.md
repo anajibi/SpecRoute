@@ -433,18 +433,24 @@ model's coding differs from the logical one — both codings.
 **14,242 admitted interventions.** Graph B has no edges, so there the flip *is* the
 counterfactual — same code, different `moved` sets.
 
-**Causal3DIdent** (`cohorts/causal3dident/do_{attr}.npz` + `cohort_summary.json`), 25,200 test
-rows across 7 classes. Written as npz because 100,800 interventions as JSON is ~40 MB of
-repeated floats.
+**Causal3DIdent** (`cohorts/causal3dident/do_{attr}.npz` + `cohort_summary.json`). The test set
+is **25,200** rows (7 classes × 3,600). Using all of them would be 100,800 interventions — 7×
+CelebA for a dataset that exercises the support rule less, so the cohort is a **stratified
+subsample of 5,000 sources**, balanced across the 7 classes (715/715/714/714/714/714/714).
+
+The classes are exactly equal in the test set, so a balanced draw is also a uniform one. `row`
+indexes the full 25,200-row test set, so a source stays identifiable. **Support is referenced
+against every rendered row (277,200, train + test)**, not the subsample: whether a value is
+attested for a class is a property of the dataset, not of how many sources were drawn.
 
 | intervention | admitted | moves | excluded |
 |---|---|---|---|
-| do(class) | 21,016 / 25,200 | class, pos_obj, rot_obj | 4,184 |
-| do(pos_spl) | 23,456 / 25,200 | pos_spl, pos_obj | 1,744 |
-| do(pos_obj) | 25,177 / 25,200 | pos_obj (sink) | 23 |
-| do(rot_obj) | 25,132 / 25,200 | rot_obj (sink) | 68 |
+| do(class) | 4,163 / 5,000 | class, pos_obj, rot_obj | 837 |
+| do(pos_spl) | 4,661 / 5,000 | pos_spl, pos_obj | 339 |
+| do(pos_obj) | 4,991 / 5,000 | pos_obj (sink) | 9 |
+| do(rot_obj) | 4,987 / 5,000 | rot_obj (sink) | 13 |
 
-**94,781 admitted interventions.** The propagation is visible in the `moves` column and matches
+**18,802 admitted interventions.** The propagation is visible in the `moves` column and matches
 the graph exactly: `class` is a parent of both `pos_obj` and `rot_obj`; `pos_spl` is a parent of
 `pos_obj` only; the two sinks move nothing else.
 
