@@ -412,5 +412,93 @@ guidance value** for CelebA graph A, plus 3,000 reconstructions and 3,000 DDIM i
 This removes cohort construction as a source of disagreement entirely, and makes the prevalence
 of each cell in the score equal to its prevalence in the test set.
 
-C3DI's cohort follows the same rule once its class-conditional support has been measured; its
-data is in S3 (`causal3dident_testset_128.h5`, 1.24 GB) and has not yet been checked.
+### 7.5 Cohort artifacts
+
+A cohort is a **file**, not a convention, so an evaluator never infers anything. Per dataset and
+attribute it carries: the source row, the factual vector, the **post-intervention vector after
+SCM propagation**, which attributes moved, the support count or range check, and — where the
+model's coding differs from the logical one — both codings.
+
+**CelebA-HQ** (`cohorts/celebahq/graph{A,B}_{attr}.json`), 3,000 test images:
+
+| graph | intervention | admitted | propagated | excluded (out of support) |
+|---|---|---|---|---|
+| A | do(Male) | 3,000 | **2,249** | 0 |
+| A | do(Young) | 3,000 | 54 | 0 |
+| A | do(Beard) | 1,121 | 0 | **1,879** |
+| A | do(Bald) | 1,121 | 0 | **1,879** |
+| B | do(Eyeglasses) | 3,000 | 0 | 0 |
+| B | do(Smiling) | 3,000 | 0 | 0 |
+
+**14,242 admitted interventions.** Graph B has no edges, so there the flip *is* the
+counterfactual — same code, different `moved` sets.
+
+**Causal3DIdent** (`cohorts/causal3dident/do_{attr}.npz` + `cohort_summary.json`), 25,200 test
+rows across 7 classes. Written as npz because 100,800 interventions as JSON is ~40 MB of
+repeated floats.
+
+| intervention | admitted | moves | excluded |
+|---|---|---|---|
+| do(class) | 21,016 / 25,200 | class, pos_obj, rot_obj | 4,184 |
+| do(pos_spl) | 23,456 / 25,200 | pos_spl, pos_obj | 1,744 |
+| do(pos_obj) | 25,177 / 25,200 | pos_obj (sink) | 23 |
+| do(rot_obj) | 25,132 / 25,200 | rot_obj (sink) | 68 |
+
+**94,781 admitted interventions.** The propagation is visible in the `moves` column and matches
+the graph exactly: `class` is a parent of both `pos_obj` and `rot_obj`; `pos_spl` is a parent of
+`pos_obj` only; the two sinks move nothing else.
+
+**C3DI has essentially no out-of-support region.** Every class spans the full [−1, 1] on every
+conditioned dimension, so reflection lands outside a class's observed range for only 0.032% of
+values. The exclusions above come almost entirely from `do(class)`, where the SCM moves
+`pos_obj`/`rot_obj` into a value the *new* class does not occupy. Contrast CelebA, where 6 of 16
+joint cells are empty and 36.2% of interventions are dropped. **The support rule is the same;
+the datasets differ.** A rendered dataset with full-support marginals does not exercise it; a
+dataset of photographs does. Any conclusion about off-distribution behaviour drawn from C3DI
+alone would not transfer.
+
+C3DI's three rendered-but-unconditioned factors — `hue_obj`, `hue_spl`, `hue_bg` — are the
+`fc_unobs` pool and are carried in the cohort so FC is scorable without re-reading the data.
+
+---
+
+## 8. SCM availability
+
+**For every model under evaluation, the SCM it was trained against must be loadable and must
+perform abduction.** Without it `do(X)` cannot be propagated to descendants, and what is scored
+is not the counterfactual — it is the flip with the graph ignored. On CelebA graph A that
+difference is 2,249 of 3,000 interventions; on C3DI `do(class)` it is all 25,200.
+
+Each SCM is verified before use by the property that actually matters:
+
+```
+null intervention must reproduce the factual values:  counterfactual(x, {}) == x
+```
+
+A loader that returns a model with silently wrong weights otherwise looks like success.
+
+Current state (`able/shared/scm_registry.py`, run it to re-check):
+
+| SCM | status | loaded with |
+|---|---|---|
+| celebahq graph A | loaded, **consistent** | attrs Male, Young, Beard, Bald |
+| celebahq graph B | loaded, **consistent** | attrs Eyeglasses, Smiling |
+| c3di gaussian | loaded, **consistent** | hidden 32, gaussian |
+| c3di spline | loaded, **consistent** | hidden 64, spline |
+
+Two of these could not be loaded at all before this protocol was written, and the failures are
+the kind that stay hidden until someone tries:
+
+- `causal3dident_scm.pt` was trained when `ContextEncoder`'s hidden width defaulted to **32**.
+  The default later became **64**, and the width is not recorded in the checkpoint, so
+  `load_state_dict` failed on a shape mismatch. The weights were never wrong — **the loader
+  drifted away from them.**
+- Neither C3DI checkpoint records its mechanism (`gaussian` vs `spline`).
+- `celebahq_b_scm.pt` did not exist despite being referenced by
+  `causal_graph_celebahq_b.yaml`. Fitted 2026-11-09 (no edges, so two marginals).
+
+`scm_registry.py` infers hidden width and mechanism from the state_dict rather than guessing, so
+a checkpoint saved under any past default still loads. **Requirement going forward: an SCM
+checkpoint records its own architecture**, and the cohort header records which SCM produced it
+(`cohort_summary.json: scm.loaded_with`). An evaluation run must use the same SCM the cohort was
+built with; a mismatch invalidates the targets.
