@@ -445,12 +445,12 @@ attested for a class is a property of the dataset, not of how many sources were 
 
 | intervention | admitted | moves | excluded |
 |---|---|---|---|
-| do(class) | 4,163 / 5,000 | class, pos_obj, rot_obj | 837 |
-| do(pos_spl) | 4,661 / 5,000 | pos_spl, pos_obj | 339 |
+| do(class) | 4,996 / 5,000 | class, pos_obj, rot_obj | 4 |
+| do(pos_spl) | 5,000 / 5,000 | pos_spl, pos_obj | 0 |
 | do(pos_obj) | 4,991 / 5,000 | pos_obj (sink) | 9 |
 | do(rot_obj) | 4,987 / 5,000 | rot_obj (sink) | 13 |
 
-**18,802 admitted interventions.** The propagation is visible in the `moves` column and matches
+**19,974 admitted interventions**, built with the **spline** SCM (§8.1). The propagation is visible in the `moves` column and matches
 the graph exactly: `class` is a parent of both `pos_obj` and `rot_obj`; `pos_spl` is a parent of
 `pos_obj` only; the two sinks move nothing else.
 
@@ -469,6 +469,41 @@ C3DI's three rendered-but-unconditioned factors — `hue_obj`, `hue_spl`, `hue_b
 ---
 
 ## 8. SCM availability
+
+### 8.1 Choosing between fitted SCMs — C3DI is spline
+
+Where more than one SCM is fitted for a dataset, **the one with the higher held-out fit is
+canonical**. The SCM defines the counterfactual targets, so this is not a preference.
+
+Measured on all 25,200 held-out C3DI rows (the stored `test_nll` in each checkpoint reproduces
+exactly):
+
+| mechanism | test NLL | per dim | verdict |
+|---|---|---|---|
+| gaussian | 5.8832 | 0.7354 | |
+| **spline** | **5.2910** | **0.6614** | canonical — better by 0.5922 nats/sample |
+
+The choice is not cosmetic. Rebuilding the cohort with the spline SCM changed the admitted
+counts sharply:
+
+| intervention | excluded, gaussian | excluded, spline |
+|---|---|---|
+| do(class) | 837 | **4** |
+| do(pos_spl) | 339 | **0** |
+
+The gaussian SCM was propagating descendants to values the post-intervention class does not
+occupy — the worse fit showing up directly as spurious out-of-support exclusions.
+
+### 8.2 Numerical floor on "moved"
+
+An attribute counts as moved only above the SCM's own abduct→propagate round-trip error.
+Measured in float32 on the test latents: 1.2e-07 (`pos_spl`) and 2.9e-06 (`pos_obj`) under
+spline, 3.0e-07 under gaussian — **identical under a null intervention**, so it is round-trip
+noise rather than leakage. A 1e-6 threshold reported `rot_obj`, a sink with no children, as
+moving `pos_obj` on 3 of 5,000 sources, which would have read as a graph violation. The
+threshold is **1e-4**.
+
+### 8.3 Availability
 
 **For every model under evaluation, the SCM it was trained against must be loadable and must
 perform abduction.** Without it `do(X)` cannot be propagated to descendants, and what is scored

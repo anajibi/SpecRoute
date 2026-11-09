@@ -44,6 +44,12 @@ COLS = {"pos_obj": [0, 1, 2], "rot_obj": [3, 4, 5], "pos_spl": [6],
 CONDITIONED = ["class", "pos_spl", "pos_obj", "rot_obj"]
 UNMODELED = ["hue_obj", "hue_spl", "hue_bg"]
 ANGULAR = {"rot_obj"}                      # +pi flip rather than reflection
+# An attribute counts as MOVED only above the SCM's own abduct->propagate round-trip error.
+# Measured on the test latents in float32: 1.2e-07 (pos_spl) and 2.9e-06 (pos_obj) for the
+# spline mechanism, 3.0e-07 for gaussian -- and identical under a null intervention, so it is
+# round-trip noise, not leakage. A 1e-6 threshold reported `rot_obj` (a sink, no children) as
+# moving `pos_obj` on 3 of 5,000 sources, which would have been a false graph violation.
+MOVE_TOL = 1e-4
 N_CLASS = 7
 
 
@@ -63,7 +69,10 @@ def load_split(root, split):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--root", default="experiments/hdae/data/causal3dident")
-    ap.add_argument("--scm", default="experiments/hdae/outputs/scm/causal3dident_scm.pt")
+    # SPLINE is canonical: measured on all 25,200 held-out rows, test NLL 5.2910 against the
+    # gaussian's 5.8832 -- better by 0.5922 nats per sample (0.0740 per dim). The SCM defines
+    # the counterfactual targets, so the better-fitting one is not a preference.
+    ap.add_argument("--scm", default="experiments/hdae/outputs/scm/causal3dident_scm_spline.pt")
     ap.add_argument("--out", default="outputs/cohorts/causal3dident")
     ap.add_argument("--seed", type=int, default=20261109)
     ap.add_argument("--n-test", type=int, default=5000,
@@ -139,7 +148,7 @@ def main():
                 hi = np.array([sup[c][j][1] for c in cls_post])
                 keep &= (vals[:, k] >= lo - 1e-6) & (vals[:, k] <= hi + 1e-6)
 
-        moved = {nm: int((np.abs(cf[nm] - (Cte.reshape(-1,1) if nm=="class" else Xte[:, COLS[nm]])).max(1) > 1e-6).sum())
+        moved = {nm: int((np.abs(cf[nm] - (Cte.reshape(-1,1) if nm=="class" else Xte[:, COLS[nm]])).max(1) > MOVE_TOL).sum())
                  for nm in CONDITIONED}
         np.savez_compressed(
             os.path.join(a.out, f"do_{attr}.npz"),
