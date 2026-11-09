@@ -302,11 +302,16 @@ Two conditions preserve it:
    pooling hides it entirely. (Measured on a skewed binary: 60% success removing the attribute
    against 18% creating it, on a label that was 74% negative in training.)
 
+**Per-attribute raws are reported, always.** `CC`, `fc_obs`, `fc_unobs` and `cf1` are given
+**per attribute, unaggregated**, in addition to any mean. An average over attributes hides
+exactly the thing the CheXpert work found — that the same model scored +0.70 on one attribute
+and +0.17 on another — and a single CF1 cannot be unpicked after the fact.
+
 Every reported cell carries:
 
 ```
 attribute, kind, intervention, guidance
-CC, FC (per named FC set), CF1
+CC, fc_obs, fc_unobs, cf1        # RAW, per attribute, never only as a mean
 e_achieved, e_floor, e_inaction          # so CC is recomputable
 hit / real-flip / freebie / wrong-move   # categorical only
 CC split by direction                    # binary only
@@ -316,6 +321,67 @@ n, and bootstrap CI on CC
 ```
 
 A cell missing `e_floor` or the instrument record is not reportable.
+
+---
+
+## 9. Auxiliary metrics
+
+**None of the metrics in this section enter CC, FC or CF1.** They are reported beside them and
+never combined with them. CC/FC/CF1 are defined on attribute readings against the SCM's targets
+(§2–§4) and that definition does not change; these answer questions those three cannot, and
+mixing them would make the headline numbers incomparable with anything measured before.
+
+### 9.1 Image-level preservation
+
+FC measures attribute *readings*. An edit can preserve every reading and still wreck the image —
+the high-guidance failure, where the attribute classifier is satisfied by texture that is not a
+face. Three measures, all computed **counterfactual vs. that source's own reconstruction** (not
+vs. the real image, so autoencoding error is not charged to the edit):
+
+| metric | needs | notes |
+|---|---|---|
+| **LPIPS** | pretrained VGG/Alex backbone (~50 MB) | perceptual; the one that actually tracks human judgement, and the one that catches guidance artifacts |
+| **L1 / PSNR** | nothing | cheap and exactly reproducible, but punishes a large legitimate edit as hard as corruption |
+| **SSIM / MS-SSIM** | nothing | structural; more forgiving of brightness and contrast shifts than L1 |
+
+All three are reported per attribute. The backbone used for LPIPS is recorded as an instrument,
+with its version, exactly as the attribute readers are.
+
+These are **expected to be non-zero** — an edit that changes nothing would score perfectly here
+and 0 on CC. They are read against the null-intervention floor, not against zero.
+
+### 9.2 Realism
+
+**FID** between the generated counterfactuals and the real test distribution. This catches at
+the distribution level what CC is blind to per image: a model whose edits land but whose outputs
+stop looking like the data.
+
+FID is biased by sample size, so **n is fixed and reported** alongside it, and FID values are
+only ever compared at equal n. Computed per attribute and pooled.
+
+### 9.3 Composition / cycle consistency
+
+`do(X = flip)` then `do(X = factual)` should return to the starting image. Nothing else in the
+protocol tests this: a model can score well on CC and FC while its edits are not invertible.
+
+Reported at **cycle 1** (is the edit invertible at all) and **cycle 10** (does it drift).
+After any *even* number of cycles the image should equal the source's reconstruction; distance
+from it is the drift.
+
+**This has its own cohort and never touches the main one** (§7.6). Ten cycles is twenty
+generations per (source, attribute) — on CelebA graph A's 8,242 interventions that would be
+~160 hours — so it runs on a small stratified subset. Only interventions admitted by the main
+cohort are eligible: a cycle through an out-of-support cell would measure the support rule, not
+composition.
+
+Drift is measured with the §9.1 metrics plus the attribute readings, and is reported on its own.
+It does not enter CF1.
+
+### 9.4 Not measured
+
+**Identity preservation** (face-embedding distance) is deliberately absent. LPIPS covers "is
+this still the same image" well enough for this protocol's purposes, and a face-recognition
+instrument would apply to CelebA only, breaking the cross-dataset ruler §6 exists to protect.
 
 ---
 
@@ -465,6 +531,24 @@ alone would not transfer.
 
 C3DI's three rendered-but-unconditioned factors — `hue_obj`, `hue_spl`, `hue_bg` — are the
 `fc_unobs` pool and are carried in the cohort so FC is scorable without re-reading the data.
+
+### 7.6 Composition cohort
+
+Separate from the main cohort, and never averaged into it (§9.3). Stratified — over the factual
+joint cell for CelebA, over class for C3DI — so rare cells survive the small draw.
+
+| block | sources | block | sources |
+|---|---|---|---|
+| A_Male | 56 | B_Eyeglasses | 64 |
+| A_Young | 56 | B_Smiling | 64 |
+| A_Beard | 58 | c3di_class | 63 |
+| A_Bald | 58 | c3di_pos_spl | 63 |
+| | | c3di_pos_obj | 63 |
+| | | c3di_rot_obj | 63 |
+
+**608 sources, 12,160 generations at 10 cycles** (~2.43M UNet evals). The cohort stores the two
+endpoints rather than twenty targets: cycle *k* applies `target` on odd *k* and `factual` on
+even *k*, so the generator derives the schedule deterministically.
 
 ---
 
