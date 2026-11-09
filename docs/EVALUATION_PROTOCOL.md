@@ -6,8 +6,9 @@
 Supersedes the CC definition in `able/adapters/base.py` (`cc_from_error`). FC and CF1 carry over
 from `able/shared/metrics.py`, with the FC floor made explicit (§3).
 
-Four layers, not interchangeable:
+Five layers, not interchangeable:
 
+0. **Test set, cohort and intervention semantics** — what is scored at all (§7)
 1. **Instrument admission** — which predictors may score anything (§1)
 2. **CC / FC** — per-intervention components (§2, §3)
 3. **CF1** — combination (§4)
@@ -315,3 +316,101 @@ n, and bootstrap CI on CC
 ```
 
 A cell missing `e_floor` or the instrument record is not reportable.
+
+---
+
+## 7. Test set, cohort and intervention semantics
+
+### 7.1 Test set
+
+**CelebA-HQ: all 3,000 images of partition 2.** The dataset is 30,000, partitioned
+24,000 / 3,000 / 3,000 (train / val / test) — confirmed from `celebahq_256_attrs.npz`.
+
+No sub-sampling. Earlier evaluations used three different n's and they are not
+interchangeable:
+
+| set | n | what it was |
+|---|---|---|
+| test | 3,000 | partition 2, real images |
+| selection | 2,400 | a slice of **partition 0** — the *training* partition — used to tune thresholds and apply the F1 keep rule |
+| reconstruction eval | 2,048 | the images actually reconstructed and re-read |
+
+`selection_metrics.json` is therefore **not a held-out measurement** and must not be quoted as
+one; it reads about 1 pp optimistic against the test set.
+
+**Outstanding work:** §1.2 requires floors measured on reconstructions, and only 2,048 of the
+3,000 have been reconstructed. The remaining 952 must be reconstructed before the gate can be
+enforced on the full test set.
+
+### 7.2 Intervention semantics
+
+A counterfactual is a **flip**. For each source image and each conditioned attribute, the
+attribute is flipped and the SCM is used to abduct, act and predict, so every descendant takes
+its post-intervention value and the model is conditioned on the whole post-intervention vector.
+
+| kind | flip |
+|---|---|
+| binary | `v → 1 − v` |
+| categorical (K > 2) | `v → (v + 1 + U{0, K−2}) mod K`, seeded |
+| continuous, bounded symmetric | **`v → −v`** — reflection through the range centre |
+| continuous, angular | **`v → v + π`** (wrapped) |
+
+Reflection is the continuous analogue of a binary flip: deterministic, maximal, symmetric and
+reproducible, and it puts the edit size comfortably above the instrument floor by construction
+(§2.1). C3DI's `pos_spl`, `pos_obj` and `rot_obj` are all bounded to [−1, 1]; `rot_obj` and the
+hue factors are angular and take the `+π` form.
+
+### 7.3 Support restriction — no out-of-distribution track
+
+**Interventions are restricted to attested combinations.** (Decision of 2026-09-24, retained.)
+An intervention is requested only if the resulting joint cell of the conditioned attributes is
+attested in the data:
+
+```
+count(post-intervention cell, full dataset) ≥ 10
+```
+
+The threshold applies to the **full joint cell**, not to a pairwise margin. Measured support in
+CelebA-HQ graph A (Male, Young → Beard, Bald):
+
+| combination | whole dataset | test partition |
+|---|---|---|
+| Beard & Male | 5,662 | 555 |
+| **Beard & Female** | **10** | **0** |
+| Bald & Male | 711 | 65 |
+| **Bald & Female** | **1** | **0** |
+| Bald & Young | 138 | 11 |
+
+**Six of the sixteen joint cells are empty in the test partition, and every one is a female
+with beard or baldness.** At the ≥ 10 rule:
+
+| intervention | kept | excluded |
+|---|---|---|
+| do(Male) | 2,416 / 3,000 | 19.5% |
+| do(Young) | 3,000 / 3,000 | 0% |
+| do(Beard) | 1,121 / 3,000 | 62.6% |
+| do(Bald) | 1,121 / 3,000 | 62.6% |
+| **total** | **7,658 / 12,000** | **36.2%** |
+
+Thresholds of ≥ 1 and ≥ 50 exclude 2.3% and 39.2% respectively; ≥ 1 admits the single bald
+female and the ten bearded females as "support", which contradicts the policy's own stated
+intent.
+
+**There is no OOD track.** Off-distribution generalisation — arguably the point of a causal
+model — therefore goes unmeasured by this protocol, and that is a deliberate, recorded cost.
+A consequence worth stating: because support is checked *after* propagation, an intervention on
+a **child** attribute is what exits support (`do(Beard=1)` leaves `Male` fixed), while an
+intervention on a **parent** propagates and stays in support. The exclusions above are almost
+entirely child interventions.
+
+### 7.4 Cohort
+
+**Every admitted intervention on every test image.** No stratified sub-sampling: 3,000 sources
+× 4 conditioned attributes, minus the support exclusions, = **7,658 counterfactuals per
+guidance value** for CelebA graph A, plus 3,000 reconstructions and 3,000 DDIM inversions.
+
+This removes cohort construction as a source of disagreement entirely, and makes the prevalence
+of each cell in the score equal to its prevalence in the test set.
+
+C3DI's cohort follows the same rule once its class-conditional support has been measured; its
+data is in S3 (`causal3dident_testset_128.h5`, 1.24 GB) and has not yet been checked.
